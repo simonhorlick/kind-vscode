@@ -1,0 +1,22 @@
+{
+  "name": "formality-vscode-extension",
+  "description": "A minimal VSCode extension that launches the formality language server.",
+  "author": "Microsoft Corporation",
+  "license": "MIT",
+  "version": "0.0.1",
+  "publisher": "simonhorlick",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simonhorlick/formality-vscode"
+  },
+  "engines": {
+    "vscode": "^1.43.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^6.1.3"
+  },
+  "devDependencies": {
+    "@types/vscode": "1.43.0",
+    "vscode-test": "^1.3.0"
+  }
+}

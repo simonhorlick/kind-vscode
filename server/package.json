@@ -1,0 +1,33 @@
+{
+  "name": "formality-lsp",
+  "description": "A language server protocol implementation for the Formality language.",
+  "version": "0.1.0",
+  "author": "Simon Horlick",
+  "license": "MIT",
+  "engines": {
+    "node": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simonhorlick/formality-vscode"
+  },
+  "scripts": {
+    "test": "mocha -r ts-node/register ./src/**/*_test.ts",
+    "test:watch": "mocha --watch -r ts-node/register ./src/**/*_test.ts"
+  },
+  "dependencies": {
+    "formality-js": "^0.2.21",
+    "vscode-languageserver": "^6.1.1",
+    "vscode-languageserver-textdocument": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.2.14",
+    "@types/mocha": "^8.2.0",
+    "@types/node": "^13.13.40",
+    "chai": "^4.2.0",
+    "mocha": "^8.2.1",
+    "ts-node": "^9.1.1",
+    "tslint": "^5.20.1",
+    "typescript": "^3.9.7"
+  }
+}
