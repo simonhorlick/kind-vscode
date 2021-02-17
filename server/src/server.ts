@@ -57,7 +57,6 @@ let definitions = new Map<uri, any /* Fm.Defs */>();
 
 // loadFromFilesystem creates a `TextDocument` from a local uri.
 async function loadFromFilesystem(uri: uri): Promise<TextDocument> {
-  console.log(`loading ${uri}`);
   const content = await fs.readFile(stripFileProtocol(uri), "utf8");
   return TextDocument.create(uri, "fm", 0, content);
 }
@@ -81,13 +80,16 @@ connection.onInitialized(async () => {
     }
 
     // Display an initial set of diagnostics.
-    computeDiagnostics();
+    let diagnostics = computeDiagnostics();
+    for (const [uri, diag] of diagnostics.entries()) {
+      connection.sendDiagnostics({ uri: uri, diagnostics: diag, version: 0 });
+    }
   }
 });
 
 // computeDiagnostics typechecks everything and sends the report as
 // diagnostics to the client.
-function computeDiagnostics() {
+function computeDiagnostics(): Map<uri, Diagnostic[]> {
   const defs = mergeDefs(definitions);
 
   const names = fm["List.mapped"](fm["Map.keys"](defs))(
@@ -109,6 +111,8 @@ function computeDiagnostics() {
 
   console.log(`done, sending diagnostics`);
 
+  let result = new Map<uri, Diagnostic[]>();
+
   // We must also send empty reports for files that no longer have any
   // diagnostics to display. So iterate over all files we know about.
   for (const uri of definitions.keys()) {
@@ -118,12 +122,12 @@ function computeDiagnostics() {
     }
     let errs = reports.get(uri);
     if (errs == undefined) {
-      connection.sendDiagnostics({ uri: doc!.uri, diagnostics: [] });
+      result.set(doc!.uri, []);
     } else {
-      let diagnostics = lspResponseToDiagnostics(doc!, errs);
-      connection.sendDiagnostics({ uri: doc!.uri, diagnostics });
+      result.set(doc!.uri, lspResponseToDiagnostics(doc!, errs));
     }
   }
+  return result;
 }
 
 var workspaceFolders: WorkspaceFolder[];
@@ -160,7 +164,14 @@ documents.onDidChangeContent(async (change) => {
   definitions.set(change.document.uri, val);
 
   // Typecheck and send diagnostics to the UI.
-  computeDiagnostics();
+  let diagnostics = computeDiagnostics();
+  for (const [uri, diag] of diagnostics.entries()) {
+    connection.sendDiagnostics({
+      uri: uri,
+      diagnostics: diag,
+      version: change.document.version,
+    });
+  }
 });
 
 documents.onDidClose(async (e) => {

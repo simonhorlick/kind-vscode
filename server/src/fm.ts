@@ -2,7 +2,6 @@ const fm = require("formality-js/src/formality.js");
 
 export function parse(uri: string, content: string): any {
   const start = process.hrtime.bigint();
-  console.log(`parsing ${uri}`);
   const parsed = fm["Fm.Parser.file"](uri)(content)(fm["Map.new"])(BigInt(0))(
     content
   );
