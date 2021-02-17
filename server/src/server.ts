@@ -98,7 +98,7 @@ function computeDiagnostics() {
 
   console.log(`synth complete`);
 
-  const report = fm["LanguageServer.check3"](synth);
+  const report = fm["LanguageServer.check"](synth);
 
   let reports = new Map<string, LspResponse[]>();
   for (const r of toJavascriptArray(report)) {

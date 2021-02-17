@@ -89,7 +89,7 @@ describe("fm", () => {
     console.log(`synth complete`);
     console.log(`checking`);
 
-    const report = fm["LanguageServer.check3"](synth);
+    const report = fm["LanguageServer.check"](synth);
 
     // If there are no diagnostics we'll get a nil List here.
     expect(report._).to.equal("List.nil");
@@ -109,7 +109,7 @@ describe("fm", () => {
 
     const synth = fm["IO.purify"](fm["Fm.Synth.many"](names)(defs));
 
-    const report = fm["LanguageServer.check3"](synth);
+    const report = fm["LanguageServer.check"](synth);
 
     const reportArray = toJavascriptArray(report);
 
