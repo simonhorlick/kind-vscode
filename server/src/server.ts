@@ -158,7 +158,7 @@ documents.onDidOpen(async (event) => {
 });
 
 // Handle file edits by running the typechecker.
-documents.onDidChangeContent(async (change) => {
+documents.onDidChangeContent((change) => {
   // Parse the changes in this file.
   const val = parse(change.document.uri, change.document.getText());
   definitions.set(change.document.uri, val);
