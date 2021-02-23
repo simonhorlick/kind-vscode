@@ -1,27 +1,7 @@
 const fm = require("formality-js/src/formality.js");
 
 export function parse(uri: string, content: string): any {
-  const start = process.hrtime.bigint();
-  const parsed = fm["Fm.Parser.file"](uri)(content)(fm["Map.new"])(BigInt(0))(
-    content
-  );
-  switch (parsed._) {
-    case "Parser.Reply.value":
-      // idx: Nat, code: String, val: Map(Fm.Def)
-      console.log(
-        `parsed file ${uri} in ${
-          Number(process.hrtime.bigint() - start) / 1e6
-        }ms`
-      );
-
-      return parsed.val;
-    case "Parser.Reply.error":
-      // FIXME: Handle parse errors properly.
-      console.log(`parse error: ${parsed.err}`);
-      break;
-    default:
-      throw "unhandled case";
-  }
+  return fm["Fm.Parser.file"](uri)(content)(fm["Map.new"])(BigInt(0))(content);
 }
 
 export function listToArray<T>(list: any): T[] {

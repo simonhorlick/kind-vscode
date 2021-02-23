@@ -74,9 +74,37 @@ connection.onInitialized(async () => {
       let doc = await loadFromFilesystem(filename);
       filesystemSources.set(filename, doc);
 
-      // FIXME: Display parse errors.
-      const val = parse(filename, doc.getText());
-      definitions.set(filename, val);
+      const parsed = parse(filename, doc.getText());
+      switch (parsed._) {
+        case "Parser.Reply.value":
+          console.log(`parsed file ${doc.uri}`);
+          definitions.set(doc.uri, parsed.val);
+          break;
+        case "Parser.Reply.error":
+          // FIXME: Handle parse errors properly.
+          console.log(`parse error: ${parsed.err}`);
+
+          // Typecheck and send diagnostics to the UI.
+          connection.sendDiagnostics({
+            uri: doc.uri,
+            diagnostics: [
+              {
+                severity: DiagnosticSeverity.Error,
+                range: {
+                  start: doc.positionAt(Number(parsed.idx)),
+                  end: doc.positionAt(Number(parsed.idx)),
+                },
+                message: parsed.err,
+                source: "Formality",
+              },
+            ],
+            version: doc.version,
+          });
+
+          break;
+        default:
+          throw "unhandled case";
+      }
     }
 
     // Display an initial set of diagnostics.
@@ -160,17 +188,47 @@ documents.onDidOpen(async (event) => {
 // Handle file edits by running the typechecker.
 documents.onDidChangeContent((change) => {
   // Parse the changes in this file.
-  const val = parse(change.document.uri, change.document.getText());
-  definitions.set(change.document.uri, val);
+  const parsed = parse(change.document.uri, change.document.getText());
+  switch (parsed._) {
+    case "Parser.Reply.value":
+      console.log(`parsed file ${change.document.uri}`);
+      definitions.set(change.document.uri, parsed.val);
 
-  // Typecheck and send diagnostics to the UI.
-  let diagnostics = computeDiagnostics();
-  for (const [uri, diag] of diagnostics.entries()) {
-    connection.sendDiagnostics({
-      uri: uri,
-      diagnostics: diag,
-      version: change.document.version,
-    });
+      // Typecheck and send diagnostics to the UI.
+      let diagnostics = computeDiagnostics();
+      for (const [uri, diag] of diagnostics.entries()) {
+        connection.sendDiagnostics({
+          uri: uri,
+          diagnostics: diag,
+          version: change.document.version,
+        });
+      }
+
+      break;
+    case "Parser.Reply.error":
+      // FIXME: Handle parse errors properly.
+      console.log(`parse error: ${parsed.err}`);
+
+      // Typecheck and send diagnostics to the UI.
+      connection.sendDiagnostics({
+        uri: change.document.uri,
+        diagnostics: [
+          {
+            severity: DiagnosticSeverity.Error,
+            range: {
+              start: change.document.positionAt(Number(parsed.idx)),
+              end: change.document.positionAt(Number(parsed.idx)),
+            },
+            message: parsed.err,
+            source: "Formality",
+          },
+        ],
+        version: change.document.version,
+      });
+
+      break;
+    default:
+      throw "unhandled case";
   }
 });
 
@@ -208,7 +266,11 @@ function mergeDefs(defs: Map<uri, any /* Fm.Defs */>): /* Fm.Defs */ any {
   var result = fm["Map.new"];
   for (const file of defs.keys()) {
     const def = defs.get(file);
-    result = fm["Map.union"](result)(def);
+    try {
+      result = fm["Map.union"](result)(def);
+    } catch (e) {
+      console.error(e);
+    }
   }
   return result;
 }
