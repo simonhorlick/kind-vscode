@@ -25,6 +25,8 @@ import { debounceTime } from "rxjs/operators";
 
 const fm = require("formality-js/src/formality.js");
 
+var util = require("util");
+
 // connection handles messages between this LSP server and the client.
 let connection = createConnection(ProposedFeatures.all);
 
@@ -236,9 +238,11 @@ documentChanges.pipe(debounceTime(checkDelayMillis)).subscribe((change) => {
 
       // console.log(values(definitions2));
 
-      // Remove defs that were deleted as part of this change.
-      for (const bits of listToArray(fm["Map.keys"](oldDefs))) {
-        definitions2 = fm["Map.delete"](bits)(definitions2);
+      if (oldDefs != undefined) {
+        // Remove defs that were deleted as part of this change.
+        for (const bits of listToArray(fm["Map.keys"](oldDefs))) {
+          definitions2 = fm["Map.delete"](bits)(definitions2);
+        }
       }
       // console.log(values(definitions2));
 
@@ -267,7 +271,7 @@ documentChanges.pipe(debounceTime(checkDelayMillis)).subscribe((change) => {
 
       // beware of the order of args here - in case of a collision union takes the first argument.
       definitions2 = fm["Map.union"](parsed.val)(definitions2);
-      console.log(values(definitions2));
+      // console.log(values(definitions2));
 
       console.log(`will re-check: ${listToArray(defsToCheck).join(", ")}`);
       break;
@@ -354,7 +358,22 @@ documentChanges.pipe(debounceTime(checkDelayMillis)).subscribe((change) => {
   console.log(
     `handled change in ${Number(process.hrtime.bigint() - startChange) / 1e6}ms`
   );
+
+  reverseDependencies("String.starts_with", definitions2);
 });
+
+function reverseDependencies(name: string, defs: any) {
+  let defsl = values(defs);
+
+  // Find all references.
+  for (const def of defsl) {
+    const d = def as any;
+    if (d.name == "Example.fib") {
+      let deps = fm["LanguageServer.dependencies"](d.term);
+      console.log(deps);
+    }
+  }
+}
 
 // Handle file edits by running the typechecker.
 documents.onDidChangeContent((change) => documentChanges.next(change));
