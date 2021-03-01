@@ -12,7 +12,13 @@ import {
 import { Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
 
-import { LspResponse, parse, toJavascriptArray } from "./fm";
+import {
+  listToArray,
+  LspResponse,
+  parse,
+  toJavascriptArray,
+  values,
+} from "./fm";
 
 import { Subject } from "rxjs";
 import { debounceTime } from "rxjs/operators";
@@ -58,6 +64,9 @@ function stripFileProtocol(uri: string): string {
 type uri = string;
 let filesystemSources = new Map<uri, TextDocument>();
 let definitions = new Map<uri, any /* Fm.Defs */>();
+let definitions2 = fm["Map.new"]; /* Fm.Defs */
+
+let initialCheck = false;
 
 // loadFromFilesystem creates a `TextDocument` from a local uri.
 async function loadFromFilesystem(uri: uri): Promise<TextDocument> {
@@ -84,6 +93,7 @@ connection.onInitialized(async () => {
       switch (parsed._) {
         case "Parser.Reply.value":
           definitions.set(doc.uri, parsed.val);
+          definitions2 = fm["Map.union"](parsed.val)(definitions2);
           break;
         case "Parser.Reply.error":
           console.log(`parse error: ${parsed.err}`);
@@ -115,6 +125,8 @@ connection.onInitialized(async () => {
     for (const [uri, diag] of diagnostics.entries()) {
       connection.sendDiagnostics({ uri: uri, diagnostics: diag, version: 0 });
     }
+
+    initialCheck = true;
   }
 });
 
@@ -127,9 +139,10 @@ function computeDiagnostics(): Map<uri, Diagnostic[]> {
     fm["Fm.Name.from_bits"]
   );
 
+  const start = process.hrtime.bigint();
   const synth = fm["IO.purify"](fm["Fm.Synth.many"](names)(defs));
-
-  console.log(`synth complete`);
+  definitions2 = synth;
+  console.log(`synth took ${Number(process.hrtime.bigint() - start) / 1e6}ms`);
 
   const report = fm["LanguageServer.check"](synth);
 
@@ -205,12 +218,58 @@ const checkDelayMillis = 150;
 // FIXME(simon): This will collapse edits to different files together - we
 // need to ensure this doesn't happen.
 documentChanges.pipe(debounceTime(checkDelayMillis)).subscribe((change) => {
+  if (!initialCheck) return;
+
+  const startChange = process.hrtime.bigint();
+
   // Parse the changes in this file.
   const parsed = parse(change.document.uri, change.document.getText());
+  console.log(
+    `parse took ${Number(process.hrtime.bigint() - startChange) / 1e6}ms`
+  );
+
+  let defsToCheck;
+
   switch (parsed._) {
     case "Parser.Reply.value":
+      let oldDefs = definitions.get(change.document.uri);
+
+      // console.log(values(definitions2));
+
+      // Remove defs that were deleted as part of this change.
+      for (const bits of listToArray(fm["Map.keys"](oldDefs))) {
+        definitions2 = fm["Map.delete"](bits)(definitions2);
+      }
+      // console.log(values(definitions2));
+
       // console.log(`parsed file ${doc.uri}`);
       definitions.set(change.document.uri, parsed.val);
+      defsToCheck = fm["List.mapped"](fm["Map.keys"](parsed.val))(
+        fm["Fm.Name.from_bits"]
+      );
+
+      // console.log(
+      //   `current defs are: ${listToArray(
+      //     fm["List.mapped"](fm["Map.keys"](definitions2))(
+      //       fm["Fm.Name.from_bits"]
+      //     )
+      //   ).join(", ")}`
+      // );
+
+      // console.log(values(definitions2));
+
+      // for (const bits of listToArray(fm["Map.keys"](parsed.val))) {
+      //   definitions2 = fm["Map.delete"](bits)(definitions2);
+      // }
+
+      // console.log(values(definitions2));
+      // console.log(values(parsed.val));
+
+      // beware of the order of args here - in case of a collision union takes the first argument.
+      definitions2 = fm["Map.union"](parsed.val)(definitions2);
+      console.log(values(definitions2));
+
+      console.log(`will re-check: ${listToArray(defsToCheck).join(", ")}`);
       break;
     case "Parser.Reply.error":
       console.log(`parse error: ${parsed.err}`);
@@ -237,15 +296,64 @@ documentChanges.pipe(debounceTime(checkDelayMillis)).subscribe((change) => {
       throw "unhandled case";
   }
 
-  // Typecheck and send diagnostics to the UI.
-  let diagnostics = computeDiagnostics();
-  for (const [uri, diag] of diagnostics.entries()) {
+  // Make a list of defs that need re-checking.
+  //  - all defs in the changed file (better: the def that's been edited)
+  //  - defs that reference the edited ones (the reverse deps)
+
+  //// Typecheck and send diagnostics to the UI.
+  // let diagnostics = computeDiagnostics();
+
+  const startSynth = process.hrtime.bigint();
+  definitions2 = fm["IO.purify"](
+    fm["Fm.Synth.many"](defsToCheck)(definitions2)
+  );
+  console.log(
+    `synth took ${Number(process.hrtime.bigint() - startSynth) / 1e6}ms`
+  );
+
+  const startReport = process.hrtime.bigint();
+
+  const report = fm["LanguageServer.check"](definitions2);
+
+  let reports = new Map<string, LspResponse[]>();
+  for (const r of toJavascriptArray(report)) {
+    let arr = reports.get(r.file) ?? [];
+    let upd = arr.concat([r]);
+    reports.set(r.file, upd);
+  }
+
+  let result = new Map<uri, Diagnostic[]>();
+
+  // We must also send empty reports for files that no longer have any
+  // diagnostics to display. So iterate over all files we know about.
+  for (const uri of definitions.keys()) {
+    let doc = documents.get(uri);
+    if (doc == undefined) {
+      doc = filesystemSources.get(uri);
+    }
+    let errs = reports.get(uri);
+    if (errs == undefined) {
+      result.set(doc!.uri, []);
+    } else {
+      result.set(doc!.uri, lspResponseToDiagnostics(doc!, errs));
+    }
+  }
+
+  console.log(
+    `report took ${Number(process.hrtime.bigint() - startReport) / 1e6}ms`
+  );
+
+  for (const [uri, diag] of result.entries()) {
     connection.sendDiagnostics({
       uri: uri,
       diagnostics: diag,
       version: change.document.version,
     });
   }
+
+  console.log(
+    `handled change in ${Number(process.hrtime.bigint() - startChange) / 1e6}ms`
+  );
 });
 
 // Handle file edits by running the typechecker.
@@ -286,7 +394,7 @@ function mergeDefs(defs: Map<uri, any /* Fm.Defs */>): /* Fm.Defs */ any {
   for (const file of defs.keys()) {
     const def = defs.get(file);
     try {
-      result = fm["Map.union"](result)(def);
+      result = fm["Map.union"](def)(result);
     } catch (e) {
       console.error(e);
     }
