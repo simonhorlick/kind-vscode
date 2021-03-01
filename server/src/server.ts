@@ -14,8 +14,8 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 
 import { LspResponse, parse, toJavascriptArray } from "./fm";
 
-import { interval, Subject } from "rxjs";
-import { debounce, debounceTime } from "rxjs/operators";
+import { Subject } from "rxjs";
+import { debounceTime } from "rxjs/operators";
 
 const fm = require("formality-js/src/formality.js");
 
