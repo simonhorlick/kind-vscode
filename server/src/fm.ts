@@ -4,6 +4,19 @@ export function parse(uri: string, content: string): any {
   return fm["Fm.Parser.file"](uri)(content)(fm["Map.new"])(BigInt(0))(content);
 }
 
+export function values<T>(map: any): T[] {
+  let result = [];
+  switch (map._) {
+    case "Map.tie":
+      if (map.val._ != "Maybe.none") {
+        result.push(map.val.value);
+      }
+      result = result.concat(values(map.lft), values(map.rgt));
+      break;
+  }
+  return result;
+}
+
 export function listToArray<T>(list: any): T[] {
   let result = [];
   switch (list._) {
