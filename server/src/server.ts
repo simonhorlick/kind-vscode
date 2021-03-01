@@ -230,7 +230,9 @@ documentChanges.pipe(debounceTime(checkDelayMillis)).subscribe((change) => {
         ],
         version: change.document.version,
       });
-      break;
+
+      // No need to typecheck if there's a parse error.
+      return;
     default:
       throw "unhandled case";
   }
