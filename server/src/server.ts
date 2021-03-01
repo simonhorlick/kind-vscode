@@ -7,11 +7,15 @@ import {
   ProposedFeatures,
   TextDocumentSyncKind,
   WorkspaceFolder,
+  TextDocumentChangeEvent,
 } from "vscode-languageserver";
 import { Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 import { LspResponse, parse, toJavascriptArray } from "./fm";
+
+import { interval, Subject } from "rxjs";
+import { debounce, debounceTime } from "rxjs/operators";
 
 const fm = require("formality-js/src/formality.js");
 
@@ -74,17 +78,16 @@ connection.onInitialized(async () => {
       let doc = await loadFromFilesystem(filename);
       filesystemSources.set(filename, doc);
 
+      // TODO(simon): Parse files in parallel using a pool of workers as this
+      // is CPU-bound.
       const parsed = parse(filename, doc.getText());
       switch (parsed._) {
         case "Parser.Reply.value":
-          console.log(`parsed file ${doc.uri}`);
           definitions.set(doc.uri, parsed.val);
           break;
         case "Parser.Reply.error":
-          // FIXME: Handle parse errors properly.
           console.log(`parse error: ${parsed.err}`);
-
-          // Typecheck and send diagnostics to the UI.
+          // Send parse errors to the UI.
           connection.sendDiagnostics({
             uri: doc.uri,
             diagnostics: [
@@ -185,30 +188,32 @@ documents.onDidOpen(async (event) => {
   filesystemSources.delete(event.document.uri);
 });
 
-// Handle file edits by running the typechecker.
-documents.onDidChangeContent((change) => {
+// documentChanges acts as a queue of file edits to be processed.
+const documentChanges = new Subject<TextDocumentChangeEvent<TextDocument>>();
+
+// The duration to wait during the debounce operation.
+const checkDelayMillis = 150;
+
+// When a file edit happens we wait for `checkDelayMillis` to see if
+// any other edits happen within that time window. If more edits happen
+// during the time span we reset the timer and discard older change events.
+// Once we reach the end of the time span without any new events occuring we
+// trigger a parse and typecheck. This ensures the user gets the most
+// up-to-date results and that we don't waste resources checking files
+// that are actively being edited.
+//
+// FIXME(simon): This will collapse edits to different files together - we
+// need to ensure this doesn't happen.
+documentChanges.pipe(debounceTime(checkDelayMillis)).subscribe((change) => {
   // Parse the changes in this file.
   const parsed = parse(change.document.uri, change.document.getText());
   switch (parsed._) {
     case "Parser.Reply.value":
-      console.log(`parsed file ${change.document.uri}`);
+      // console.log(`parsed file ${doc.uri}`);
       definitions.set(change.document.uri, parsed.val);
-
-      // Typecheck and send diagnostics to the UI.
-      let diagnostics = computeDiagnostics();
-      for (const [uri, diag] of diagnostics.entries()) {
-        connection.sendDiagnostics({
-          uri: uri,
-          diagnostics: diag,
-          version: change.document.version,
-        });
-      }
-
       break;
     case "Parser.Reply.error":
-      // FIXME: Handle parse errors properly.
       console.log(`parse error: ${parsed.err}`);
-
       // Typecheck and send diagnostics to the UI.
       connection.sendDiagnostics({
         uri: change.document.uri,
@@ -225,12 +230,24 @@ documents.onDidChangeContent((change) => {
         ],
         version: change.document.version,
       });
-
       break;
     default:
       throw "unhandled case";
   }
+
+  // Typecheck and send diagnostics to the UI.
+  let diagnostics = computeDiagnostics();
+  for (const [uri, diag] of diagnostics.entries()) {
+    connection.sendDiagnostics({
+      uri: uri,
+      diagnostics: diag,
+      version: change.document.version,
+    });
+  }
 });
+
+// Handle file edits by running the typechecker.
+documents.onDidChangeContent((change) => documentChanges.next(change));
 
 documents.onDidClose(async (e) => {
   // The document is no longer available from `documents`, so retrieve the
