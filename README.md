@@ -44,6 +44,6 @@ The following features are planned:
 
 - [ ] Hover over a symbol to view its documentation
 - [x] Jump to definition
-- [-] Autocompletion
+- [ ] Autocompletion
 - [ ] Rename symbol
 - [ ] Support for other editors, for example: Atom, vim
