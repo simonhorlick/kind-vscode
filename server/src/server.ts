@@ -1,65 +1,29 @@
-import { promises as fs } from "fs";
-import * as path from "path";
-
 import {
   createConnection,
   TextDocuments,
   ProposedFeatures,
   TextDocumentSyncKind,
   WorkspaceFolder,
+  Range,
+  TextDocumentPositionParams,
+  CompletionItem,
 } from "vscode-languageserver";
 import { Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
 
-import { LspResponse, parse, toJavascriptArray } from "./fm";
+import { listToArray, LspResponse, parse, values } from "./fm";
+
+import { listFiles, loadFromFilesystem, stripFileProtocol, uri } from "./files";
 
 const fm = require("formality-js/src/formality.js");
 
 // connection handles messages between this LSP server and the client.
 let connection = createConnection(ProposedFeatures.all);
 
-// listFiles recursively searches the filesystem path `p` for files, returning
-// them as a list of absolute uris.
-async function listFiles(p: string): Promise<string[]> {
-  const entries = await fs.readdir(p, { withFileTypes: true });
+let sources = new Map<uri, TextDocument>();
+let defs = fm["Map.new"]; /* Fm.Defs */
 
-  var result: string[] = [];
-
-  const files = entries
-    .filter((entry) => !entry.isDirectory())
-    .map((file) => "file://" + path.join(p, file.name));
-
-  const dirs = entries.filter((entry) => entry.isDirectory());
-
-  for (const directory of dirs) {
-    var d = await listFiles(path.join(p, directory.name));
-    result = result.concat(d);
-  }
-
-  result = result.concat(files);
-
-  return result;
-}
-
-// stripFileProtocol strips the protocol prefix from the uri if it is the
-// file: protocol. If not the uri is returned unchanged.
-function stripFileProtocol(uri: string): string {
-  const fileProtocolPrefix = "file://";
-  if (uri.startsWith(fileProtocolPrefix)) {
-    return uri.substr(fileProtocolPrefix.length);
-  }
-  return uri;
-}
-
-type uri = string;
-let filesystemSources = new Map<uri, TextDocument>();
-let definitions = new Map<uri, any /* Fm.Defs */>();
-
-// loadFromFilesystem creates a `TextDocument` from a local uri.
-async function loadFromFilesystem(uri: uri): Promise<TextDocument> {
-  const content = await fs.readFile(stripFileProtocol(uri), "utf8");
-  return TextDocument.create(uri, "fm", 0, content);
-}
+let initialCheck = false;
 
 connection.onInitialized(async () => {
   for (const workspace of workspaceFolders) {
@@ -67,68 +31,66 @@ connection.onInitialized(async () => {
     console.log(`checking workspace: ${workspace.name}`);
 
     let workspaceFiles = await listFiles(stripFileProtocol(workspace.uri));
-    let sources = workspaceFiles.filter((file) => file.endsWith(".fm"));
+    let sourceFiles = workspaceFiles.filter((file) => file.endsWith(".fm"));
 
     // Read all source files into memory.
-    for (const filename of sources) {
+    for (const filename of sourceFiles) {
       let doc = await loadFromFilesystem(filename);
-      filesystemSources.set(filename, doc);
+      sources.set(filename, doc);
 
-      // FIXME: Display parse errors.
-      const val = parse(filename, doc.getText());
-      definitions.set(filename, val);
+      // TODO(simon): Parse files in parallel using a pool of workers as this
+      // is CPU-bound.
+      const parsed = parse(filename, doc.getText());
+      switch (parsed._) {
+        case "Parser.Reply.value":
+          defs = fm["Map.union"](parsed.val)(defs);
+          break;
+        case "Parser.Reply.error":
+          console.log(`parse error: ${parsed.err}`);
+          // Send parse errors to the UI.
+          connection.sendDiagnostics({
+            uri: doc.uri,
+            diagnostics: [
+              {
+                severity: DiagnosticSeverity.Error,
+                range: {
+                  start: doc.positionAt(Number(parsed.idx)),
+                  end: doc.positionAt(Number(parsed.idx)),
+                },
+                message: parsed.err,
+                source: "Formality",
+              },
+            ],
+            version: doc.version,
+          });
+
+          break;
+        default:
+          throw "unhandled case";
+      }
     }
 
+    const names = fm["List.mapped"](fm["Map.keys"](defs))(
+      fm["Fm.Name.from_bits"]
+    );
+
+    const start = process.hrtime.bigint();
+    defs = fm["IO.purify"](fm["Fm.Synth.many"](names)(defs));
+    console.log(
+      `synth took ${Number(process.hrtime.bigint() - start) / 1e6}ms`
+    );
+
+    const report = fm["Lsp.diagnostics"](defs);
+
     // Display an initial set of diagnostics.
-    let diagnostics = computeDiagnostics();
+    let diagnostics = computeDiagnostics(report, documents, sources);
     for (const [uri, diag] of diagnostics.entries()) {
       connection.sendDiagnostics({ uri: uri, diagnostics: diag, version: 0 });
     }
+
+    initialCheck = true;
   }
 });
-
-// computeDiagnostics typechecks everything and sends the report as
-// diagnostics to the client.
-function computeDiagnostics(): Map<uri, Diagnostic[]> {
-  const defs = mergeDefs(definitions);
-
-  const names = fm["List.mapped"](fm["Map.keys"](defs))(
-    fm["Fm.Name.from_bits"]
-  );
-
-  const synth = fm["IO.purify"](fm["Fm.Synth.many"](names)(defs));
-
-  console.log(`synth complete`);
-
-  const report = fm["LanguageServer.check"](synth);
-
-  let reports = new Map<string, LspResponse[]>();
-  for (const r of toJavascriptArray(report)) {
-    let arr = reports.get(r.file) ?? [];
-    let upd = arr.concat([r]);
-    reports.set(r.file, upd);
-  }
-
-  console.log(`done, sending diagnostics`);
-
-  let result = new Map<uri, Diagnostic[]>();
-
-  // We must also send empty reports for files that no longer have any
-  // diagnostics to display. So iterate over all files we know about.
-  for (const uri of definitions.keys()) {
-    let doc = documents.get(uri);
-    if (doc == undefined) {
-      doc = filesystemSources.get(uri);
-    }
-    let errs = reports.get(uri);
-    if (errs == undefined) {
-      result.set(doc!.uri, []);
-    } else {
-      result.set(doc!.uri, lspResponseToDiagnostics(doc!, errs));
-    }
-  }
-  return result;
-}
 
 var workspaceFolders: WorkspaceFolder[];
 
@@ -141,6 +103,10 @@ connection.onInitialize(async (params) => {
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
+      definitionProvider: true,
+      completionProvider: {
+        resolveProvider: true,
+      },
     },
   };
 });
@@ -154,32 +120,98 @@ let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 documents.onDidOpen(async (event) => {
   // If the file is open in the editor its contents are taken from
   // `documents` instead of `filesystemSources`.
-  filesystemSources.delete(event.document.uri);
+  sources.delete(event.document.uri);
 });
 
 // Handle file edits by running the typechecker.
 documents.onDidChangeContent((change) => {
-  // Parse the changes in this file.
-  const val = parse(change.document.uri, change.document.getText());
-  definitions.set(change.document.uri, val);
+  if (!initialCheck) return;
 
-  // Typecheck and send diagnostics to the UI.
-  let diagnostics = computeDiagnostics();
-  for (const [uri, diag] of diagnostics.entries()) {
+  const startChange = process.hrtime.bigint();
+
+  const pair = fm["Lsp.on_change"](change.document.uri)(
+    change.document.getText()
+  )(defs);
+
+  defs = pair.fst;
+  const report = pair.snd;
+
+  let result = computeDiagnostics(report, documents, sources);
+
+  for (const [uri, diag] of result.entries()) {
     connection.sendDiagnostics({
       uri: uri,
       diagnostics: diag,
       version: change.document.version,
     });
   }
+
+  console.log(
+    `handled change in ${Number(process.hrtime.bigint() - startChange) / 1e6}ms`
+  );
 });
 
 documents.onDidClose(async (e) => {
   // The document is no longer available from `documents`, so retrieve the
   // saved version from the filesystem.
   let doc = await loadFromFilesystem(e.document.uri);
-  filesystemSources.set(e.document.uri, doc);
+  sources.set(e.document.uri, doc);
 });
+
+// Look up the definition of the symbol at the given source position.
+connection.onDefinition((what) => {
+  const start = process.hrtime.bigint();
+
+  const uri = what.textDocument.uri;
+  const doc = documents.get(uri);
+  if (doc == undefined) {
+    console.log(`document not found: ${uri}`);
+    return null;
+  }
+  const offset = doc.offsetAt(what.position);
+
+  let maybe = fm["Lsp.definition"](uri)(offset)(defs);
+  if (maybe._ == "Maybe.none") {
+    return null;
+  }
+
+  const term /* Fm.Def */ = maybe.value;
+
+  // Compute the source range of the term in the referenced file using the
+  // offset in `term.orig`.
+  let targetDoc = TextDocument.create(term.file, "fm", 0, term.code);
+  const range = Range.create(
+    targetDoc.positionAt(Number(term.orig.fst)),
+    targetDoc.positionAt(Number(term.orig.snd))
+  );
+
+  console.log(
+    `handled references in ${Number(process.hrtime.bigint() - start) / 1e6}ms`
+  );
+
+  return [
+    {
+      uri: term.file,
+      range: range,
+    },
+  ];
+});
+
+// Provide a list of possible completions that the user can auto-complete.
+// Currently we just return the names of all top-level definitions.
+connection.onCompletion(
+  (position: TextDocumentPositionParams): CompletionItem[] =>
+    listToArray(
+      fm["Lsp.on_completions"](position.textDocument.uri)(position.position)(
+        defs
+      )
+    )
+);
+
+// This handler resolves additional information for the item selected in
+// the completion list. There's currently no additional information so just
+// return the original completion unchanged.
+connection.onCompletionResolve((item) => item);
 
 // Handle document change events.
 documents.listen(connection);
@@ -203,12 +235,37 @@ function lspResponseToDiagnostics(
   }));
 }
 
-// mergeDefs computes the union of all defs provided.
-function mergeDefs(defs: Map<uri, any /* Fm.Defs */>): /* Fm.Defs */ any {
-  var result = fm["Map.new"];
-  for (const file of defs.keys()) {
-    const def = defs.get(file);
-    result = fm["Map.union"](result)(def);
+// computeDiagnostics typechecks everything and sends the report as
+// diagnostics to the client.
+function computeDiagnostics(
+  report: any,
+  documents: TextDocuments<TextDocument>,
+  sources: Map<string, TextDocument>
+): Map<uri, Diagnostic[]> {
+  // group by uri: LspResponse[] -> Map(uri, LspResponse[])
+  let reports = new Map<string, LspResponse[]>();
+  for (const r of listToArray<LspResponse>(report)) {
+    let arr = reports.get(r.file) ?? [];
+    let upd = arr.concat([r]);
+    reports.set(r.file, upd);
+  }
+
+  let result = new Map<uri, Diagnostic[]>();
+
+  // We must also send empty reports for files that no longer have any
+  // diagnostics to display. So iterate over all files we know about.
+  for (const d of values(defs)) {
+    let uri = (d as any).file;
+    let errs = reports.get(uri);
+    if (errs == undefined) {
+      result.set(uri, []);
+    } else {
+      let doc = documents.get(uri);
+      if (doc == undefined) {
+        doc = sources.get(uri);
+      }
+      result.set(uri, lspResponseToDiagnostics(doc!, errs));
+    }
   }
   return result;
 }
