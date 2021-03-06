@@ -22,13 +22,13 @@ suite("diagnostics", () => {
           "- b: Bool\n",
         range: toRange(27, 21, 27, 22),
         severity: vscode.DiagnosticSeverity.Error,
-        source: "Formality",
+        source: "Kind",
       },
       {
         message: "Undefined reference: bool\n",
         range: toRange(6, 13, 6, 17),
         severity: vscode.DiagnosticSeverity.Error,
-        source: "Formality",
+        source: "Kind",
       },
     ]);
   });

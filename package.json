@@ -1,12 +1,12 @@
 {
-  "name": "formality-vscode",
-  "description": "A Formality language server and client for Visual Studio Code",
+  "name": "kind-vscode",
+  "description": "A Kind language server and client for Visual Studio Code",
   "author": "Simon Horlick",
   "license": "MIT",
   "version": "0.1.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/simonhorlick/formality-vscode"
+    "url": "https://github.com/simonhorlick/kind-vscode"
   },
   "publisher": "simonhorlick",
   "categories": [
@@ -19,18 +19,18 @@
     "vscode": "^1.43.0"
   },
   "activationEvents": [
-    "onLanguage:fm",
-    "workspaceContains:**/*.fm"
+    "onLanguage:kind",
+    "workspaceContains:**/*.kind"
   ],
   "languages": [
     {
-      "id": "fm",
+      "id": "kind",
       "aliases": [
-        "Formality",
-        "fm"
+        "Kind",
+        "kind"
       ],
       "extensions": [
-        ".fm"
+        ".kind"
       ]
     }
   ],
@@ -38,13 +38,13 @@
   "contributes": {
     "languages": [
       {
-        "id": "fm",
+        "id": "kind",
         "aliases": [
-          "Formality",
-          "fm"
+          "Kind",
+          "kind"
         ],
         "extensions": [
-          ".fm"
+          ".kind"
         ]
       }
     ]
@@ -58,10 +58,10 @@
   },
   "devDependencies": {
     "@types/mocha": "^8.0.3",
-    "mocha": "^8.1.1",
     "@types/node": "^12.12.0",
-    "eslint": "^6.4.0",
     "@typescript-eslint/parser": "^2.3.0",
+    "eslint": "^6.4.0",
+    "mocha": "^8.1.1",
     "typescript": "^4.0.2"
   }
 }

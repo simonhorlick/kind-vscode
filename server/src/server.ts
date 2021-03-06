@@ -15,7 +15,7 @@ import { listToArray, LspResponse, parse, values } from "./fm";
 
 import { listFiles, loadFromFilesystem, stripFileProtocol, uri } from "./files";
 
-const fm = require("formality-js/src/formality.js");
+const fm = require("kind-lang/src/kind.js");
 
 // connection handles messages between this LSP server and the client.
 let connection = createConnection(ProposedFeatures.all);
@@ -27,11 +27,11 @@ let initialCheck = false;
 
 connection.onInitialized(async () => {
   for (const workspace of workspaceFolders) {
-    // Load all Formality sources under each of the workspaces.
+    // Load all sources under each of the workspaces.
     console.log(`checking workspace: ${workspace.name}`);
 
     let workspaceFiles = await listFiles(stripFileProtocol(workspace.uri));
-    let sourceFiles = workspaceFiles.filter((file) => file.endsWith(".fm"));
+    let sourceFiles = workspaceFiles.filter((file) => file.endsWith(".kind"));
 
     // Read all source files into memory.
     for (const filename of sourceFiles) {
@@ -58,7 +58,7 @@ connection.onInitialized(async () => {
                   end: doc.positionAt(Number(parsed.idx)),
                 },
                 message: parsed.err,
-                source: "Formality",
+                source: "Kind",
               },
             ],
             version: doc.version,
@@ -71,11 +71,11 @@ connection.onInitialized(async () => {
     }
 
     const names = fm["List.mapped"](fm["Map.keys"](defs))(
-      fm["Fm.Name.from_bits"]
+      fm["Kind.Name.from_bits"]
     );
 
     const start = process.hrtime.bigint();
-    defs = fm["IO.purify"](fm["Fm.Synth.many"](names)(defs));
+    defs = fm["IO.purify"](fm["Kind.Synth.many"](names)(defs));
     console.log(
       `synth took ${Number(process.hrtime.bigint() - start) / 1e6}ms`
     );
@@ -231,7 +231,7 @@ function lspResponseToDiagnostics(
       end: textDocument.positionAt(response.upto),
     },
     message: response.message,
-    source: "Formality",
+    source: "Kind",
   }));
 }
 

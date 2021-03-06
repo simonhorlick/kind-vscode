@@ -1,8 +1,18 @@
-# formality-vscode
+# kind-vscode
 
-A Visual Studio Code plugin for the Formality programming language. This plugin provides output from the formality typechecker to VSCode.
+A Visual Studio Code plugin for the Kind programming language. This plugin provides output from the kind typechecker to VSCode.
 
 ![Screenshot of the plugin displaying a diagnostic message](./example.png)
+
+## Architecture
+
+![A architecture diagram showing the high level components](./architecture.jpg)
+
+This extension is structured as three pieces:
+
+- A vscode extension that launches kind-lsp
+- A language server, kind-lsp, that's written in node and contains the state
+- A set of functions for computing results, written in Kind.
 
 ## Structure
 
@@ -33,7 +43,7 @@ In VSCode there is a launch configuration named "Launch Client" that will start 
 The following features are planned:
 
 - [ ] Hover over a symbol to view its documentation
-- [ ] Jump to definition
-- [ ] Autocompletion
+- [x] Jump to definition
+- [-] Autocompletion
 - [ ] Rename symbol
 - [ ] Support for other editors, for example: Atom, vim

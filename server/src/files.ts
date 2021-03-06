@@ -40,5 +40,5 @@ export function stripFileProtocol(uri: string): string {
 // loadFromFilesystem creates a `TextDocument` from a local uri.
 export async function loadFromFilesystem(uri: uri): Promise<TextDocument> {
   const content = await fs.readFile(stripFileProtocol(uri), "utf8");
-  return TextDocument.create(uri, "fm", 0, content);
+  return TextDocument.create(uri, "kind", 0, content);
 }

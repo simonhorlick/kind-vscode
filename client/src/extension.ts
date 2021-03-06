@@ -4,16 +4,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import * as path from "path";
-import {
-  ExtensionContext,
-  Range,
-  Position,
-  languages,
-  TextDocument,
-  DiagnosticSeverity,
-  DiagnosticCollection,
-  Uri,
-} from "vscode";
+import { ExtensionContext } from "vscode";
 
 import {
   LanguageClient,
@@ -48,13 +39,13 @@ export function activate(context: ExtensionContext) {
 
   // Options to control the language client
   let clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "fm" }],
+    documentSelector: [{ scheme: "file", language: "kind" }],
   };
 
   // Create the language client and start the client.
   client = new LanguageClient(
-    "languageServerExample",
-    "Formality Language Server",
+    "kindLsp",
+    "Kind Language Server",
     serverOptions,
     clientOptions
   );

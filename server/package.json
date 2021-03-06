@@ -1,6 +1,6 @@
 {
-  "name": "formality-lsp",
-  "description": "A language server protocol implementation for the Formality language.",
+  "name": "kind-lsp",
+  "description": "A language server protocol implementation for the Kind language.",
   "version": "0.1.0",
   "author": "Simon Horlick",
   "license": "MIT",
@@ -9,14 +9,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/simonhorlick/formality-vscode"
+    "url": "https://github.com/simonhorlick/kind-vscode"
   },
   "scripts": {
     "test": "mocha -r ts-node/register ./src/**/*_test.ts",
     "test:watch": "mocha --watch -r ts-node/register ./src/**/*_test.ts"
   },
   "dependencies": {
-    "formality-js": "^0.2.21",
+    "kind-lang": "1.0.5",
     "vscode-languageserver": "^6.1.1",
     "vscode-languageserver-textdocument": "^1.0.1"
   },
