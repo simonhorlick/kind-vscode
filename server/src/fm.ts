@@ -1,3 +1,5 @@
+import { DiagnosticSeverity } from "vscode-languageserver-types";
+
 const kind = require("kind-lang/src/kind.js");
 
 export function parse(uri: string, content: string): any {
@@ -37,6 +39,7 @@ export function listToArray<T>(list: any): T[] {
 
 export interface LspResponse {
   message: string;
+  severity: DiagnosticSeverity;
   file: string;
   from: number;
   upto: number;

@@ -225,7 +225,7 @@ function lspResponseToDiagnostics(
   res: LspResponse[]
 ): Diagnostic[] {
   return res.map((response) => ({
-    severity: DiagnosticSeverity.Error,
+    severity: response.severity,
     range: {
       start: textDocument.positionAt(response.from),
       end: textDocument.positionAt(response.upto),
