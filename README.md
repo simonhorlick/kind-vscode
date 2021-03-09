@@ -2,11 +2,11 @@
 
 A Visual Studio Code plugin for the Kind programming language. This plugin provides output from the kind typechecker to VSCode.
 
-![Screenshot of the plugin displaying a diagnostic message](./example.png)
+![Screenshot of the plugin displaying a diagnostic message](https://github.com/simonhorlick/kind-vscode/raw/main/example.png)
 
 ## Architecture
 
-![A architecture diagram showing the high level components](./architecture.jpg)
+![A architecture diagram showing the high level components](https://github.com/simonhorlick/kind-vscode/raw/main/architecture.jpg)
 
 This extension is structured as three pieces:
 
