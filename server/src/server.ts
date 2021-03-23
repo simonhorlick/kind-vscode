@@ -7,6 +7,10 @@ import {
   Range,
   TextDocumentPositionParams,
   CompletionItem,
+  HoverParams,
+  Hover,
+  MarkupContent,
+  MarkupKind,
 } from "vscode-languageserver";
 import { Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
@@ -107,6 +111,7 @@ connection.onInitialize(async (params) => {
       completionProvider: {
         resolveProvider: true,
       },
+      hoverProvider: true,
     },
   };
 });
@@ -196,6 +201,80 @@ connection.onDefinition((what) => {
     },
   ];
 });
+
+connection.onHover((params: HoverParams) => {
+  console.log(
+    `hover request for ${params.textDocument.uri} position ${params.position.line} ${params.position.character}`
+  );
+
+  // Find whatever is under the cursor at this location.
+  const uri = params.textDocument.uri;
+  const doc = documents.get(uri);
+  if (doc == undefined) {
+    console.log(`document not found: ${uri}`);
+    return null;
+  }
+  const offset = doc.offsetAt(params.position);
+
+  let maybe = fm["Lsp.on_hover"](uri)(offset)(defs);
+  if (maybe._ == "Maybe.none") {
+    return null;
+  }
+
+  const list = listToArray(maybe);
+
+  const validSources = list.filter((x: any) => x.range.value != undefined);
+
+  const matches = validSources.filter(
+    (x: any) => offset >= x.range.value.fst && offset < x.range.value.snd
+  );
+
+  if (matches.length == 0) return null;
+
+  const messages = new Set<String>();
+
+  matches
+    .map((x) => display(x))
+    .filter((x) => x.length > 0)
+    // de-duplicate - this can happen in '_' cases of case expressions.
+    .forEach((x) => messages.add(x));
+
+  if (messages.size == 0) return null;
+
+  let markdown: MarkupContent = {
+    kind: MarkupKind.Markdown,
+    value: Array.from(messages.values()).join("\n"),
+  };
+  return { contents: markdown };
+});
+
+function display(f: any): string {
+  if (f.term._ == "Kind.Term.app") return "";
+  if (f.term._ == "Kind.Term.typ") return "";
+  if (f.term._ == "Kind.Term.nat") return "";
+  if (f.term._ == "Kind.Term.str") return "";
+  if (f.term._ == "Kind.Term.chr") return "";
+
+  return `
+\`\`\`typescript
+${printTerm(f.term, f.type)}
+\`\`\``;
+}
+
+function printTerm(term: any, type: any): string {
+  switch (term._) {
+    case "Kind.Term.ref":
+      return `${term.name}: ${fm["Kind.Term.show"](type.value)}`;
+    case "Kind.Term.var":
+      return `${term.name}: ${fm["Kind.Term.show"](type.value)}`;
+    case "Kind.Term.nat":
+      return `${term.natx}: ${fm["Kind.Term.show"](type.value)}`;
+    case "Kind.Term.str":
+      return `"${term.strx}": ${fm["Kind.Term.show"](type.value)}`;
+    default:
+      return `${term._} ${term.name ?? ""}`;
+  }
+}
 
 // Provide a list of possible completions that the user can auto-complete.
 // Currently we just return the names of all top-level definitions.
