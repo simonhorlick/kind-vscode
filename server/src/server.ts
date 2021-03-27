@@ -18,7 +18,7 @@ import { computeDiagnostics, listToArray, parse } from "./fm";
 
 import { listFiles, loadFromFilesystem, stripFileProtocol, uri } from "./files";
 
-const fm = require("kind.js");
+const fm = require("./kind.js");
 
 // connection handles messages between this LSP server and the client.
 let connection = createConnection(ProposedFeatures.all);

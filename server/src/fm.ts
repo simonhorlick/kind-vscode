@@ -3,7 +3,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { DiagnosticSeverity } from "vscode-languageserver-types";
 import { uri } from "./files";
 
-const kind = require("kind.js");
+const kind = require("./kind.js");
 
 export function parse(uri: string, content: string): any {
   return kind["Kind.Parser.file"](uri)(content)(kind["BitsMap.new"])(BigInt(0))(
