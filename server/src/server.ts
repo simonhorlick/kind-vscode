@@ -8,24 +8,23 @@ import {
   TextDocumentPositionParams,
   CompletionItem,
   HoverParams,
-  Hover,
   MarkupContent,
   MarkupKind,
 } from "vscode-languageserver";
-import { Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
+import { DiagnosticSeverity } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
 
-import { listToArray, LspResponse, parse, values } from "./fm";
+import { computeDiagnostics, listToArray, parse } from "./fm";
 
 import { listFiles, loadFromFilesystem, stripFileProtocol, uri } from "./files";
 
-const fm = require("kind-lang/src/kind.js");
+const fm = require("kind.js");
 
 // connection handles messages between this LSP server and the client.
 let connection = createConnection(ProposedFeatures.all);
 
 let sources = new Map<uri, TextDocument>();
-let defs = fm["Map.new"]; /* Fm.Defs */
+let defs = fm["BitsMap.new"]; /* Fm.Defs */
 
 let initialCheck = false;
 
@@ -47,7 +46,8 @@ connection.onInitialized(async () => {
       const parsed = parse(filename, doc.getText());
       switch (parsed._) {
         case "Parser.Reply.value":
-          defs = fm["Map.union"](parsed.val)(defs);
+          console.log(`parsed ${filename}`);
+          defs = fm["BitsMap.union"](parsed.val)(defs);
           break;
         case "Parser.Reply.error":
           console.log(`parse error: ${parsed.err}`);
@@ -74,11 +74,12 @@ connection.onInitialized(async () => {
       }
     }
 
-    const names = fm["List.mapped"](fm["Map.keys"](defs))(
+    const names = fm["List.mapped"](fm["BitsMap.keys"](defs))(
       fm["Kind.Name.from_bits"]
     );
 
     const start = process.hrtime.bigint();
+    console.log(`checking`);
     defs = fm["IO.purify"](fm["Kind.Synth.many"](names)(defs));
     console.log(
       `synth took ${Number(process.hrtime.bigint() - start) / 1e6}ms`
@@ -87,7 +88,12 @@ connection.onInitialized(async () => {
     const report = fm["Lsp.diagnostics"](defs);
 
     // Display an initial set of diagnostics.
-    let diagnostics = computeDiagnostics(report, documents, sources);
+    let diagnostics = computeDiagnostics(
+      report,
+      (x) => documents.get(x),
+      sources,
+      defs
+    );
     for (const [uri, diag] of diagnostics.entries()) {
       connection.sendDiagnostics({ uri: uri, diagnostics: diag, version: 0 });
     }
@@ -141,7 +147,12 @@ documents.onDidChangeContent((change) => {
   defs = pair.fst;
   const report = pair.snd;
 
-  let result = computeDiagnostics(report, documents, sources);
+  let result = computeDiagnostics(
+    report,
+    (x) => documents.get(x),
+    sources,
+    defs
+  );
 
   for (const [uri, diag] of result.entries()) {
     connection.sendDiagnostics({
@@ -297,54 +308,3 @@ documents.listen(connection);
 
 // Listen for LSP clients.
 connection.listen();
-
-// lspResponseToDiagnostics adapts an `LspResponse` into a `Diagnostic`.
-function lspResponseToDiagnostics(
-  textDocument: TextDocument,
-  res: LspResponse[]
-): Diagnostic[] {
-  return res.map((response) => ({
-    severity: response.severity,
-    range: {
-      start: textDocument.positionAt(response.from),
-      end: textDocument.positionAt(response.upto),
-    },
-    message: response.message,
-    source: "Kind",
-  }));
-}
-
-// computeDiagnostics typechecks everything and sends the report as
-// diagnostics to the client.
-function computeDiagnostics(
-  report: any,
-  documents: TextDocuments<TextDocument>,
-  sources: Map<string, TextDocument>
-): Map<uri, Diagnostic[]> {
-  // group by uri: LspResponse[] -> Map(uri, LspResponse[])
-  let reports = new Map<string, LspResponse[]>();
-  for (const r of listToArray<LspResponse>(report)) {
-    let arr = reports.get(r.file) ?? [];
-    let upd = arr.concat([r]);
-    reports.set(r.file, upd);
-  }
-
-  let result = new Map<uri, Diagnostic[]>();
-
-  // We must also send empty reports for files that no longer have any
-  // diagnostics to display. So iterate over all files we know about.
-  for (const d of values(defs)) {
-    let uri = (d as any).file;
-    let errs = reports.get(uri);
-    if (errs == undefined) {
-      result.set(uri, []);
-    } else {
-      let doc = documents.get(uri);
-      if (doc == undefined) {
-        doc = sources.get(uri);
-      }
-      result.set(uri, lspResponseToDiagnostics(doc!, errs));
-    }
-  }
-  return result;
-}
