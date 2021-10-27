@@ -1,0 +1,9 @@
+// defs returns a List of defs that exist in the given file.
+Lsp.defs(defs: Kind.Defs, uri: String): List(Kind.Def)
+  let values = BitsMap.values!(defs)
+  List.filter!(
+    (d)
+      open d; 
+      String.ends_with(uri, d.file),
+      values
+  )

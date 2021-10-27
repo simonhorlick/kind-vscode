@@ -10,16 +10,21 @@ import {
   HoverParams,
   MarkupContent,
   MarkupKind,
+  Diagnostic,
 } from "vscode-languageserver";
 import { DiagnosticSeverity } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
-
-import { computeDiagnostics, listToArray, parse } from "./fm";
-
+import {
+  computeDiagnostics,
+  listToArray,
+  parse,
+  find_base_dir,
+  LspResponse,
+} from "./fm";
 import { listFiles, loadFromFilesystem, stripFileProtocol, uri } from "./files";
-
 const fm = require("./kind.js");
 
+const ADD_PATH = find_base_dir();
 // connection handles messages between this LSP server and the client.
 let connection = createConnection(ProposedFeatures.all);
 
@@ -29,77 +34,72 @@ let defs = fm["BitsMap.new"]; /* Fm.Defs */
 let initialCheck = false;
 
 connection.onInitialized(async () => {
-  for (const workspace of workspaceFolders) {
-    // Load all sources under each of the workspaces.
-    console.log(`checking workspace: ${workspace.name}`);
-
-    let workspaceFiles = await listFiles(stripFileProtocol(workspace.uri));
-    let sourceFiles = workspaceFiles.filter((file) => file.endsWith(".kind"));
-
-    // Read all source files into memory.
-    for (const filename of sourceFiles) {
-      let doc = await loadFromFilesystem(filename);
-      sources.set(filename, doc);
-
-      // TODO(simon): Parse files in parallel using a pool of workers as this
-      // is CPU-bound.
-      const parsed = parse(filename, doc.getText());
-      switch (parsed._) {
-        case "Parser.Reply.value":
-          console.log(`parsed ${filename}`);
-          defs = fm["BitsMap.union"](parsed.val)(defs);
-          break;
-        case "Parser.Reply.error":
-          console.log(`parse error: ${parsed.err}`);
-          // Send parse errors to the UI.
-          connection.sendDiagnostics({
-            uri: doc.uri,
-            diagnostics: [
-              {
-                severity: DiagnosticSeverity.Error,
-                range: {
-                  start: doc.positionAt(Number(parsed.idx)),
-                  end: doc.positionAt(Number(parsed.idx)),
-                },
-                message: parsed.err,
-                source: "Kind",
-              },
-            ],
-            version: doc.version,
-          });
-
-          break;
-        default:
-          throw "unhandled case";
-      }
-    }
-
-    const names = fm["List.mapped"](fm["BitsMap.keys"](defs))(
-      fm["Kind.Name.from_bits"]
-    );
-
-    const start = process.hrtime.bigint();
-    console.log(`checking`);
-    defs = fm["IO.purify"](fm["Kind.Synth.many"](names)(defs));
-    console.log(
-      `synth took ${Number(process.hrtime.bigint() - start) / 1e6}ms`
-    );
-
-    const report = fm["Lsp.diagnostics"](defs);
-
-    // Display an initial set of diagnostics.
-    let diagnostics = computeDiagnostics(
-      report,
-      (x) => documents.get(x),
-      sources,
-      defs
-    );
-    for (const [uri, diag] of diagnostics.entries()) {
-      connection.sendDiagnostics({ uri: uri, diagnostics: diag, version: 0 });
-    }
-
-    initialCheck = true;
-  }
+  // for (const workspace of workspaceFolders) {
+  //   // Load all sources under each of the workspaces.
+  //   console.log(`checking workspace: ${workspace.name}`);
+  //   let workspaceFiles = await listFiles(stripFileProtocol(workspace.uri));
+  //   let sourceFiles = workspaceFiles.filter((file) => file.endsWith(".kind"));
+  //   // Read all source files into memory.
+  //   for (const filename of sourceFiles) {
+  //     let doc = await loadFromFilesystem(filename);
+  //     sources.set(filename, doc);
+  //     // TODO(simon): Parse files in parallel using a pool of workers as this
+  //     // is CPU-bound.
+  //     const parsed = parse(filename, doc.getText());
+  //     switch (parsed._) {
+  //       case "Parser.Reply.value":
+  //         console.log(`parsed ${filename}`);
+  //         defs = fm["BitsMap.union"](parsed.val)(defs);
+  //         break;
+  //       case "Parser.Reply.error":
+  //         console.log(`parse error: ${parsed.err}`);
+  //         // Send parse errors to the UI.
+  //         connection.sendDiagnostics({
+  //           uri: doc.uri,
+  //           diagnostics: [
+  //             {
+  //               severity: DiagnosticSeverity.Error,
+  //               range: {
+  //                 start: doc.positionAt(Number(parsed.idx)),
+  //                 end: doc.positionAt(Number(parsed.idx)),
+  //               },
+  //               message: parsed.err,
+  //               source: "Kind",
+  //             },
+  //           ],
+  //           version: doc.version,
+  //         });
+  //         break;
+  //       default:
+  //         throw "unhandled case";
+  //     }
+  //   }
+  //   const names = fm["List.mapped"](fm["BitsMap.keys"](defs))(
+  //     fm["Kind.Name.from_bits"]
+  //   );
+  //   const start = process.hrtime.bigint();
+  //   console.log(`checking`);
+  //   try {
+  //     defs = fm["IO.purify"](fm["Kind.Synth.many"](names)(defs));
+  //   } catch(err) {
+  //     console.log("couldn't check :(")
+  //   }
+  //   console.log(
+  //     `synth took ${Number(process.hrtime.bigint() - start) / 1e6}ms`
+  //   );
+  //   const report = fm["Lsp.diagnostics"](defs);
+  //   // Display an initial set of diagnostics.
+  //   let diagnostics = computeDiagnostics(
+  //     report,
+  //     (x) => documents.get(x),
+  //     sources,
+  //     defs
+  //   );
+  //   for (const [uri, diag] of diagnostics.entries()) {
+  //     connection.sendDiagnostics({ uri: uri, diagnostics: diag, version: 0 });
+  //   }
+  //   initialCheck = true;
+  // }
 });
 
 var workspaceFolders: WorkspaceFolder[];
@@ -134,25 +134,70 @@ documents.onDidOpen(async (event) => {
   sources.delete(event.document.uri);
 });
 
+function lspResponseToDiagnostic(
+  textDocument: TextDocument,
+  response: LspResponse
+): Diagnostic {
+  console.log(response.from);
+  console.log(response.upto);
+  return {
+    severity: response.severity,
+    range: {
+      start: textDocument.positionAt(response.from),
+      end: textDocument.positionAt(response.upto),
+    },
+    message: response.message,
+    source: "Kind",
+  };
+}
+
+function resolveDiagnostics(
+  diagnostics: LspResponse,
+  documents: TextDocuments<TextDocument>,
+  defs_array: any
+): Map<uri, Diagnostic[]> {
+  const diagnostics_array: LspResponse[] = listToArray<LspResponse>(diagnostics);
+
+  const result = new Map<uri, Diagnostic[]>();
+  const files_diagnostics_map = new Map<uri, LspResponse[]>();
+
+  for (const diagnostic of diagnostics_array) {
+    const uri = diagnostic.file;
+    const arr = files_diagnostics_map.get(diagnostic.file) ?? [];
+    const upd = arr.concat([diagnostic]);
+    const s_uri = !uri.startsWith("file://") ? "file://".concat(uri) : uri;
+    const doc = documents.get(s_uri);
+    const diagnostics = result.get(uri) ?? [];
+    const new_diagnostics = diagnostics.concat(lspResponseToDiagnostic(doc!, diagnostic));
+    files_diagnostics_map.set(diagnostic.file, upd);
+    result.set(uri, new_diagnostics);
+  }
+
+  for (const def of defs_array) {
+    const uri = def.file;
+    const diagnostics = files_diagnostics_map.get(uri);
+    if (diagnostics == undefined) {
+      result.set(uri, []);
+    }
+  }
+
+  return result;
+}
+
 // Handle file edits by running the typechecker.
-documents.onDidChangeContent((change) => {
-  if (!initialCheck) return;
+documents.onDidChangeContent(async (change) => {
+  const uri = change.document.uri;
+  const s_uri = uri.startsWith("file://") ? uri.substr(7) : uri;
+  const code = change.document.getText();
 
-  const startChange = process.hrtime.bigint();
+  const pair = await fm.run(fm["Lsp.on_change"](s_uri)(code)(defs));
 
-  const pair = fm["Lsp.on_change"](change.document.uri)(
-    change.document.getText()
-  )(defs);
+  const diagnostics = pair.fst;
+  defs = pair.snd;
 
-  defs = pair.fst;
-  const report = pair.snd;
+  const defs_array = listToArray(fm["BitsMap.values"](defs));
 
-  let result = computeDiagnostics(
-    report,
-    (x) => documents.get(x),
-    sources,
-    defs
-  );
+  const result = resolveDiagnostics(diagnostics, documents, defs_array);
 
   for (const [uri, diag] of result.entries()) {
     connection.sendDiagnostics({
@@ -162,9 +207,7 @@ documents.onDidChangeContent((change) => {
     });
   }
 
-  console.log(
-    `handled change in ${Number(process.hrtime.bigint() - startChange) / 1e6}ms`
-  );
+  console.log("handled change");
 });
 
 documents.onDidClose(async (e) => {
@@ -234,10 +277,10 @@ connection.onHover((params: HoverParams) => {
 
   const list = listToArray(maybe);
 
-  const validSources = list.filter((x: any) => x.range.value != undefined);
+  const validSources = list.filter((x: any) => x.orig.value != undefined);
 
   const matches = validSources.filter(
-    (x: any) => offset >= x.range.value.fst && offset < x.range.value.snd
+    (x: any) => offset >= x.orig.value.fst && offset < x.orig.value.snd
   );
 
   if (matches.length == 0) return null;
@@ -286,6 +329,19 @@ function printTerm(term: any, type: any): string {
       return `${term._} ${term.name ?? ""}`;
   }
 }
+
+connection.onDidOpenTextDocument((params) => {
+  console.log("INSIDE DID OPEN TEXT DOCUMENT");
+  console.log(params.textDocument);
+  return "TEST 1";
+});
+
+connection.onDidSaveTextDocument((params) => {
+  console.log("INSIDE SAVE TEXT");
+  console.log(params.textDocument);
+  console.log(params.text);
+  return "TEST 2";
+});
 
 // Provide a list of possible completions that the user can auto-complete.
 // Currently we just return the names of all top-level definitions.

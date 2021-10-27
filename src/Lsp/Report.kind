@@ -1,0 +1,7 @@
+// Report aggregates typechecking errors.
+type Lsp.Report {
+  new(
+    types: List(Pair(Kind.Name, Kind.Term)),
+    errors: List(Pair(String, Kind.Error)), // Source uri and error.
+  )
+}

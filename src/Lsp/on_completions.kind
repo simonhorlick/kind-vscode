@@ -1,0 +1,31 @@
+type Lsp.Completion {
+  new(
+    label: String,
+    kind: U32,
+    data: String
+  )
+}
+
+type Lsp.Position {
+  new(line: U32, character: U32)
+}
+
+CompletionItemKind.Function: U32
+  3u
+
+// on_completions provides a list of possible completions that the user can
+// auto-complete. Currently we just return the names of all top-level
+// definitions.
+Lsp.on_completions(
+  uri: String, 
+  position: Lsp.Position,
+  defs: Kind.Defs
+): List(Lsp.Completion)
+  // TODO: Take the context into account, rather than just returning all
+  // possible names.
+  // TODO: Include local variables from let expressions, case, etc.
+  let names = List.map!!(Kind.Name.from_bits, BitsMap.keys!(defs))
+
+  List.map!!(
+    (x) Lsp.Completion.new(x, CompletionItemKind.Function, x),
+    names)

@@ -1,0 +1,69 @@
+Lsp.on_change(file: String, code: String, defs: Kind.Defs): IO<Pair<List<Lsp.Diagnostic>, Kind.Defs>>
+  Lsp.check_file(file, code, defs)
+
+Lsp.check_file(file: String, code: String, defs: Kind.Defs): IO<Pair<List<Lsp.Diagnostic>, Kind.Defs>>
+  IO {
+    get loaded = Lsp.synth_file(file, code, defs)
+    case loaded {
+      left: IO {
+        return { [loaded.value], BitsMap.new! }
+      }
+      right: case loaded.value {
+        new: IO {
+          let nams = loaded.value.fst
+          let defs = loaded.value.snd
+          case nams {
+            nil: 
+              let err = "File not found or empty: '" | file | "'."
+              let diagnostic = Lsp.Diagnostic.new(
+                err,
+                Lsp.Diagnostic.Severity.Error,
+                file,
+                0,
+                2
+              )
+              IO { return { [diagnostic], defs } }
+            cons: IO {
+              let diagnostics = Lsp.Diagnostic.build(defs)
+              Kind.Defs.cache(defs)
+              return { diagnostics, defs }
+            }
+          }
+        }
+      }
+    }
+  }
+
+Lsp.synth_file(file: String, code: String, defs: Kind.Defs): IO<Either<Lsp.Diagnostic, Pair<List<Kind.Name>, Kind.Defs>>>
+  IO {
+    let read = Lsp.read_file(file, code, defs);
+    case read {
+      left: IO {
+        return Either.left!!(read.value);
+      },
+      right: IO {
+        let file_defs = read.value;
+        let file_keys = BitsMap.keys!(file_defs);
+        let file_nams = List.mapped!(file_keys)!(Kind.Name.from_bits);
+        get defs = Kind.Synth.many(file_nams, file_defs);
+        return Either.right!!({file_nams, defs});
+      },
+    };
+  }
+
+Lsp.read_file(file: String, code: String, defs: Kind.Defs): Either<Lsp.Diagnostic, Kind.Defs>
+  case Kind.Parser.file(file, code, defs, Parser.State.new(none, "", 0, 0, code)) as parsed {
+    error:
+      open parsed.err
+      let err = parsed.err.msg | (case parsed.err.nam { nil: "", cons: " Inside " | parsed.err.nam | ":" })
+      let diagnostic = Lsp.Diagnostic.new(
+        err,
+        Lsp.Diagnostic.Severity.Error,
+        file,
+        Nat.to_u32(parsed.err.ini)
+        Nat.to_u32(parsed.err.idx)
+      )
+      Either.left!!(diagnostic)
+    value:
+      Either.right!!(parsed.val)
+  }

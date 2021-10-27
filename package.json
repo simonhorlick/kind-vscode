@@ -50,6 +50,7 @@
     ]
   },
   "scripts": {
+    "build": "rm server/out/kind.js; cd src; kind Lsp --js | js-beautify >> ../server/out/kind.js",
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -b",
     "watch": "tsc -b -w",

@@ -1,0 +1,9 @@
+Lsp: IO<Unit>
+  IO {
+    let e = Lsp.Diagnostic.build
+    let e = Lsp.on_change
+    let e = Lsp.definition
+    let e = Lsp.on_completions
+    let e = Lsp.on_hover
+    return unit
+  }
