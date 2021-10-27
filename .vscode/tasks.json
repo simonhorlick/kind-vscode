@@ -28,6 +28,18 @@
 			"problemMatcher": [
 				"$tsc-watch"
 			]
-		}
+		},
+    {
+      "label": "kind-check",
+      "type": "shell",
+      "command": "cd src; time kind Lsp",
+      "problemMatcher": []
+    },
+    {
+      "label": "kind-check-clean",
+      "type": "shell",
+      "command": "cd src; rm -rf .cache; time kind Lsp",
+      "problemMatcher": []
+    }
 	]
 }
