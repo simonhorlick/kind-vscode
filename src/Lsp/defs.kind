@@ -1,3 +1,51 @@
+Lsp.Defs.Map.Key: Type
+  Pair<Kind.Name, Nat>
+
+Lsp.Defs.Map.Value: Type
+  Kind.Term
+
+Lsp.Defs.Map: Type
+  BBT<Lsp.Defs.Map.Key, Lsp.Defs.Map.Value>
+
+Lsp.Defs.Map.Key.cmp(
+  a: Lsp.Defs.Map.Key
+  b: Lsp.Defs.Map.Key
+): Cmp
+  let cmp = String.cmp(a@fst, b@fst)
+  case cmp {
+    eql: Nat.cmp(a@snd, b@snd)
+    ltn: cmp
+    gtn: cmp
+  }
+
+Lsp.Defs.Map.set(
+  name: Kind.Name
+  orig: Maybe<Pair<Nat, Nat>>
+  value: Lsp.Defs.Map.Value
+  lsp_defs: Lsp.Defs.Map
+): Lsp.Defs.Map
+  case orig {
+    none: lsp_defs
+    some: 
+      let key = {name, orig.value@fst}
+      let result = BBT.insert!!(Lsp.Defs.Map.Key.cmp, key, value, lsp_defs)
+
+      let debug = List.show!((x) open x; x.fst@fst, Lsp.Defs.Map.to_list(result))
+      log(debug)
+      result
+  }
+
+Lsp.Defs.Map.to_list(
+  lsp_defs: Lsp.Defs.Map
+): List<Pair<Lsp.Defs.Map.Key, Lsp.Defs.Map.Value>>
+  BBT.foldr_with_key!!!((key, value, list) {key, value} & list, [], lsp_defs)
+
+Lsp.Defs.Map.get(
+  key: Lsp.Defs.Map.Key
+  lsp_defs: Lsp.Defs.Map
+): Maybe<Lsp.Defs.Map.Value>
+  BBT.lookup!!(Lsp.Defs.Map.Key.cmp, key, lsp_defs)
+
 // defs returns a List of defs that exist in the given file.
 Lsp.defs(defs: Kind.Defs, uri: String): List(Kind.Def)
   let values = BitsMap.values!(defs)

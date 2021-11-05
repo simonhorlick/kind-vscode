@@ -1,338 +1,170 @@
-Lsp.Hover.Ref.term_name(t: Kind.Term): String
-  case t {
-    ref: t.name
-    var: t.name
-    typ: "(unnamed)"
-    all: t.name
-    lam: t.name
-    app: "(unnamed)"
-    let: t.name
-    def: t.name
-    ann: "(unnamed)"
-    gol: t.name
-    hol: "(unnamed)"
-    nat: "(unnamed)"
-    chr: "(unnamed)"
-    str: "(unnamed)"
-    cse: t.name
-    ori: "(unnamed)"
-  } default "(unnamed)"
+// where the mouse is at the document
+Lsp.Hover.Orig: Type
+  Maybe<Pair<Nat,Nat>>
 
-Lsp.Hover.Ref.show(r: Lsp.Hover.Ref): String
-  open r
-  case r.term {
-    ref: r.term.name
-    var: r.term.name
-    typ: "Type"
-    all: r.term.name
-    lam: r.term.name
-    app: "App"
-    let: r.term.name
-    def: r.term.name
-    ann: "Ann"
-    gol: r.term.name
-    hol: "Hol"
-    nat: "Nat"
-    chr: "Chr"
-    str: "Str"
-    cse: r.term.name
-    ori: "Ori"
-    new: "New"
-    get: "Get"
-    set: "Set"
-    ope: "Ope"
-    num: "Num"
-  }
+// A hover reference
+// orig: where the mouse is at the document
+// term: the term hovered
+// type: type of the term hovered
+type Lsp.Hover.Ref {
+  new(
+    orig: Lsp.Hover.Orig,
+    term: Kind.Term,
+    type: Maybe<Kind.Term>,
+  )
+}
 
-// hover_info...
-Lsp.hover_info(d: Kind.Def, defs: Kind.Defs, offset: Nat): List(Lsp.Hover.Ref)
-  open d
-  let checked = Kind.Check {
-    var res1 = Lsp.on_hover.get_info(d.type, Maybe.some!(Kind.Term.typ), defs, [], Kind.Path.Maybe.Builder.i(Kind.Path.Maybe.Builder.nil), Maybe.none!, offset, [])
-    var res2 = Lsp.on_hover.get_info(d.term, Maybe.some!(d.type), defs, [], Kind.Path.Maybe.Builder.o(Kind.Path.Maybe.Builder.nil), Maybe.none!, offset, [])
-    let result = List.concat!(Pair.snd!!(res1), Pair.snd!!(res2))
-    return {Pair.fst!!(res1), result}
-  }
-  open checked
-  case checked.value {
-    none: []
-    some: Pair.snd!!(checked.value.value)
-  }
-
-Lsp.on_hover.get_info.ref(
-  term: Kind.Term
-  name: Kind.Name
-  type: Maybe<Kind.Term>
-  defs: Kind.Defs
-  orig: Lsp.Hover.Orig
-  result: List<Lsp.Hover.Ref>
-): Kind.Check<Lsp.Hover.Result>
-  let defi = Kind.Map.get!(name, defs)
-  case defi {
-    // definition reference doesn't exist
-    none:
-      let value = Lsp.on_hover.build_result(type, result)
-      let error = [ Kind.Error.undefined_reference(orig, name) ]
-      Kind.Check.result!(value, error)
-    // reference exists
-    some: case defi.value {
-      new:
-        let ref_name = defi.value.name
-        let ref_type = defi.value.type
-        let ref_term = defi.value.term // the body of the referenced function
-        let ref_stat = defi.value.stat
-        let hover = 
-          Lsp.Hover.Ref.new(orig, term, Maybe.some!(ref_type)) & result
-        let response = case ref_stat {
-          init: { {ref_type, hover}, [Kind.Error.waiting(ref_name)] }
-          wait: { {ref_type, hover}, [] }
-          done: { {ref_type, hover}, [] }
-          fail: { {ref_type, hover}, [Kind.Error.indirect(ref_name)] }
-        }
-        let value = some(response@fst)
-        let error = response@snd
-        Kind.Check.result!(value, error)
-    }
-  }
-
-Lsp.on_hover.get_info.var(
-  term: Kind.Term
-  name: Kind.Name
-  indx: Nat
-  type: Maybe<Kind.Term>
-  ctx:  Kind.Context
-  orig: Lsp.Hover.Orig
-  result: List<Lsp.Hover.Ref>
-): Kind.Check<Lsp.Hover.Result>
-  let defi = List.at_last!(indx, ctx)
-  case defi {
-    none: 
-      let value = Lsp.on_hover.build_result(type, result)
-      let error = [ Kind.Error.undefined_reference(orig, name) ]
-      Kind.Check.result!(value, error)
-    some: 
-      open defi.value
-      let value  = defi.value.snd
-      let result = Lsp.Hover.Ref.new(orig, term, some(value)) & result
-      Kind.Check {
-        return {value, result}
-      }
-  }
-
-Lsp.on_hover.get_info.general(
-  type: Kind.Term
-  term: Kind.Term
-  orig: Lsp.Hover.Orig
-  result: List<Lsp.Hover.Ref>
-): Kind.Check<Lsp.Hover.Result>
-  let value  = term
-  let result = Lsp.Hover.Ref.new(orig, term, some(value)) & result
-  Kind.Check {
-    return { value, result }
-  }
-
-Lsp.on_hover.get_info.let(
-  name: Kind.Name
-  expr: Kind.Term
-  body: Kind.Term -> Kind.Term
-  type: Maybe<Kind.Term>
-  offset: Nat
-  path: Kind.Path.Maybe.Builder
-  ctx:  Kind.Context
-  defs: Kind.Defs
-  result: List<Lsp.Hover.Ref>
-): Kind.Check<Lsp.Hover.Result>
-  Kind.Check {
-    let ctx_size = List.length!(ctx)
-    get expr_typ = Lsp.on_hover.get_info(expr, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), none, offset, result)
-    let body_val = body(Kind.Term.var(name, ctx_size))
-    let body_ctx = { name, expr_typ@fst } & ctx
-    get body_typ = Lsp.on_hover.get_info(body_val, type, defs, body_ctx, Kind.Path.Maybe.Builder.i(path), none, offset, expr_typ@snd)
-    return body_typ
-  }
-
-// check runs the typechecker and collects information about terms to present
-// to the user.
-Lsp.on_hover.get_info(
-  term: Kind.Term,
-  type: Maybe<Kind.Term>,
-  defs: Kind.Defs,
-  ctx: Kind.Context,
-  path: Kind.Path.Maybe.Builder,
-  orig: Lsp.Hover.Orig,
-  offset: Nat,
-  result: List<Lsp.Hover.Ref>
-): Kind.Check<Lsp.Hover.Result>
-  Kind.Check {
-    case term {
-      ref: Lsp.on_hover.get_info.ref(term, term.name, type, defs, orig, result)
-      var: Lsp.on_hover.get_info.var(term, term.name, term.indx, type, ctx, orig, result)
-      typ: Lsp.on_hover.get_info.general(Kind.Term.typ, term, orig, result)
-      all: Kind.Check {
-        let ctx_size = List.length!(ctx)
-        let self_var = Kind.Term.var(term.self, ctx_size)
-        let body_var = Kind.Term.var(term.name, Nat.succ(ctx_size))
-        let body_ctx = List.cons!({term.name,term.xtyp}, List.cons!({term.self,term}, ctx))
-        var res1 = Lsp.on_hover.get_info(term.xtyp, Maybe.some!(Kind.Term.typ), defs, ctx, Kind.Path.Maybe.Builder.o(path), Maybe.none!, offset, result)
-        var res2 = Lsp.on_hover.get_info(term.body(self_var,body_var), Maybe.some!(Kind.Term.typ), defs, body_ctx, Kind.Path.Maybe.Builder.i(path), Maybe.none!, offset, Pair.snd!!(res1))
-        return {
-          Kind.Term.typ,
-          Pair.snd!!(res2)
-        }
-      },
-      lam: case type {
-        // At this point we've already typechecked the file - so this should
-        // never occur.
-        none: Kind.Check {
-          // let skip = Debug.log!("lam type=none" | " term=" | Kind.Term.show(term), (x) Unit.new)
-
-          let lam_type = Kind.Term.hol(Bits.e)
-          let lam_term = Kind.Term.ann(Bool.false, term, lam_type)
-          Kind.Check.result!(
-            Lsp.on_hover.build_result(type, result),
-            [Kind.Error.patch(Kind.Path.Maybe.Builder.to_bits(path),lam_term)])
-        },
-        some: Kind.Check {
-          // let skip = Debug.log!(
-          //   String.pad_left(Bits.length(path), ' ', "")
-          //   | "lam " | Lsp.Hover.Ref.term_name(term) | " orig=" | print_origin(orig) | " type=" | Kind.Term.show(type.value) | " term=" | Kind.Term.show(term), (x) Unit.new)
-
-          let typv = Kind.Term.reduce(type.value, defs)
-          case typv {
-            all: Kind.Check {
-              let ctx_size = List.length!(ctx)
-              let self_var = term
-              let body_var = Kind.Term.var(term.name, ctx_size)
-              let body_typ = typv.body(self_var, body_var)
-              let body_ctx = List.cons!({term.name,typv.xtyp}, ctx)
-              var res1 = Lsp.on_hover.get_info(term.body(body_var), Maybe.some!(body_typ), defs, body_ctx, Kind.Path.Maybe.Builder.o(path), Maybe.none!, offset, result)
-              return {type.value, Pair.snd!!(res1)}
-            },
-            //hol: Kind.Check {
-              //let lam_type = Kind.Term.all(Bool.false, "", "", Kind.Term.hol(Bits.e), (s,x) Kind.Term.hol(Bits.e))
-              //let lam_term = Kind.Term.ann(Bool.false, term, lam_type)
-              //Kind.Check.result!(type, [Kind.Error.patch(Kind.Path.Maybe.Builder.to_bits(path),lam_term)])
-            //},
-            _: Kind.Check {
-              let expected = Either.left!!("(function type)")
-              let detected = Either.right!!(type.value)
-              Kind.Check.result!(
-                Lsp.on_hover.build_result(type, result),
-                [Kind.Error.type_mismatch(orig, expected, detected, ctx)])
-            }
-          }
-        }
-      },
-      app: Kind.Check {
-        // let skip = Debug.log!(
-        //   String.pad_left(Bits.length(path), ' ', "")
-        //   | "app " | Lsp.Hover.Ref.term_name(term) | " orig=" | print_origin(orig) | " term=" | Kind.Term.show(term), (x) Unit.new)
-
-        var func_typ1 = Lsp.on_hover.get_info(term.func, Maybe.none!, defs, ctx, Kind.Path.Maybe.Builder.o(path), Maybe.none!, offset, result)
-        let func_typ = Kind.Term.reduce(Pair.fst!!(func_typ1), defs)
-        case func_typ {
-          all: Kind.Check {
-            var res1 = Lsp.on_hover.get_info(term.argm, Maybe.some!(func_typ.xtyp), defs, ctx, Kind.Path.Maybe.Builder.i(path), Maybe.none!, offset, Pair.snd!!(func_typ1))
-            let body_typ = func_typ.body(term.func, term.argm)
-            return {
-              body_typ,
-              List.append!(Pair.snd!!(res1),
-                Lsp.Hover.Ref.new(orig, term, Maybe.some!(Pair.fst!!(res1))))}
-          },
-          _: Kind.Check {
-            let expected = Either.left!!("(function type)")
-            let detected = Either.right!!(func_typ)
-            Kind.Check.result!(
-              Lsp.on_hover.build_result(type, result),
-              [Kind.Error.type_mismatch(orig, expected, detected, ctx)])
-          },
-        }
-      },
-      ann:
-        if term.done then Kind.Check {
-          return {term.type, result} // TODO: append ann here.
-        } else Kind.Check {
-          var res1 = Lsp.on_hover.get_info(term.term, Maybe.some!(term.type), defs, ctx, Kind.Path.Maybe.Builder.o(path), Maybe.none!, offset, result)
-          var res2 = Lsp.on_hover.get_info(term.type, Maybe.some!(Kind.Term.typ), defs, ctx, Kind.Path.Maybe.Builder.i(path), Maybe.none!, offset, Pair.snd!!(res1))
-          return {term.type, Pair.snd!!(res2)} // TODO: append ann here.
-        },
-      let: Lsp.on_hover.get_info.let(term.name, term.expr, term.body, type, offset, path, ctx, defs, result)
-      def: Kind.Check {
-        let ctx_size = List.length!(ctx)
-        var expr_typ = Lsp.on_hover.get_info(term.expr, Maybe.none!, defs, ctx, Kind.Path.Maybe.Builder.o(path), Maybe.none!, offset, result)
-        let body_val = term.body(Kind.Term.ann(Bool.true, term.expr, Pair.fst!!(expr_typ)))
-        let body_ctx = List.cons!({term.name, Pair.fst!!(expr_typ)}, ctx)
-        var body_typ = Lsp.on_hover.get_info(body_val, type, defs, body_ctx, Kind.Path.Maybe.Builder.i(path), Maybe.none!, offset, Pair.snd!!(expr_typ))
-        return {
-          Pair.fst!!(body_typ),
-          Pair.snd!!(body_typ)
-        }
-      },
-      nat: Lsp.on_hover.get_info.general(Kind.Term.ref("Nat"), term, orig, result)
-      chr: Lsp.on_hover.get_info.general(Kind.Term.ref("Char"), term, orig, result)
-      str: Lsp.on_hover.get_info.general(Kind.Term.ref("String"), term, orig, result)
-      cse: Kind.Check {
-        let expr = term.expr
-        get etyp = Lsp.on_hover.get_info(expr, Maybe.none!, defs, ctx, Kind.Path.Maybe.Builder.o(path), Maybe.none!, offset, result)
-        // If cse has no moti and we have an inferred type, then we guess it
-        // with the information we have, substituting selfs and indices.
-        // Otherwise, we just replace it by a normal hole.
-        let dsug = case term.moti {
-          none:
-            let moti = case type {
-              none:
-                Kind.Term.hol(Bits.e),
-              some:
-                let size = List.length!(ctx)
-                let typv = Kind.Term.normalize(type.value, BitsMap.new!)
-                let moti = Kind.Term.SmartMotive.make(term.name, term.expr, Pair.fst!!(etyp), typv, size, defs)
-                moti,
-            }
-            Maybe.some!(Kind.Term.cse(term.path, term.expr, term.name, term.with, term.cses, Maybe.some!(moti))),
-          some:
-            Kind.Term.check.expand.cse(term.expr, term.name, term.with, term.cses, term.moti, Pair.fst!!(etyp), Maybe.some!(Kind.Term.typ), defs, ctx),
-        }
-        case dsug {
-          none: Kind.Check.result!(Lsp.on_hover.build_result(type,result), [Kind.Error.cant_infer(orig, term, ctx)]),
-          some: Kind.Check.result!(Lsp.on_hover.build_result(type,result), [Kind.Error.patch(Kind.Path.Maybe.Builder.to_bits(path),dsug.value)]),
-        }
-      },
-      gol:
-        Kind.Check.result!(
-          Lsp.on_hover.build_result(type, result), 
-          [Kind.Error.show_goal(term.name, term.dref, term.verb, type, ctx)]
-        )
-      hol: Kind.Check.result!(Lsp.on_hover.build_result(type, result), [])
-      ori: Lsp.on_hover.get_info(term.expr, type, defs, ctx, path, Maybe.some!(term.orig), offset, result)
-    } default Kind.Check {
-        Kind.Check.result!(Lsp.on_hover.build_result(type, result), [])
-      } // TODO add remaining cases
-  }
-
-
-Lsp.on_hover.build_result(
-  type: Maybe(Kind.Term), 
-  result: List(Lsp.Hover.Ref)
-): Maybe(Pair(Kind.Term, List(Lsp.Hover.Ref)))
-  case type {
-    none: none
-    some: some( {type.value, result} )
-  }
+Lsp.Hover.Result: Type
+  Pair<Kind.Term, List<Lsp.Hover.Ref>>
 
 // on_hover looks up what appears in the source file `uri` at the given
 // `offset` and returns information about the term.
 Lsp.on_hover(
-  uri: String,
-  offset: Nat,
-  defs: Kind.Defs
-): List(Lsp.Hover.Ref)
-  let file_defs = Lsp.defs(defs, uri)
+  uri: String
+  offset: Nat
+  name: Kind.Name
+  lsp_defs: Lsp.Check.Defs
+): Maybe<String>
+  let lsp_defs = Map.values!(lsp_defs)
+  // All definitions contained in hovered file
+  let file_defs = List.filter!((d) String.ends_with(uri, d@file), lsp_defs)
 
-  // TODO: Only check if this def overlaps the region of interest.
-  List.flatten!(List.map!!((x) Lsp.hover_info(x, defs, offset), file_defs))
+  // The definition that contains the hovered term
+  let lsp_def = List.find!(Lsp.on_hover.find.offset_in_def(offset), file_defs)
+  
+  Maybe {
+    get lsp_def = lsp_def
+    // log(List.show!((x) open x; Lsp.on_hover.show.ref(x.fst@fst, x.snd) | "\n", Lsp.Defs.Map.to_list(lsp_def@refs)))
+    get type    = Lsp.on_hover.find_ref(offset, name, lsp_def@refs)
+    return Lsp.on_hover.show.ref(name, type)
+  }
 
-print_origin(orig: Lsp.Hover.Orig): String
+// FINDS
+// ================================
+
+// find which definition contains offset
+Lsp.on_hover.find.offset_in_def(offset: Nat, lsp_def: Lsp.Check.Def): Bool
+  open lsp_def
+  Nat.between(lsp_def.orig@fst, offset, lsp_def.orig@snd)
+
+// find which term (ref) of definition contains offset
+Lsp.on_hover.find_ref(
+  offset: Nat
+  name: Kind.Name
+  refs: Lsp.Defs.Map
+): Maybe<Kind.Term>
+ Lsp.on_hover.find_ref.go(offset, name, refs, none) 
+
+Lsp.on_hover.find_ref.go(
+  offset: Nat
+  name: Kind.Name
+  refs: Lsp.Defs.Map
+  result: Maybe<Kind.Term>
+): Maybe<Kind.Term>
+  case refs {
+    tip: result
+    bin: 
+      let node_name   = refs.key@fst
+      let node_offset = refs.key@snd
+      let node_type   = refs.val
+      let cmp = String.cmp(name, node_name)
+      case cmp {
+        eql:
+          if Nat.gte(offset, node_offset) then
+            Lsp.on_hover.find_ref.go(offset, name, refs.right, some(node_type))
+          else
+            Lsp.on_hover.find_ref.go(offset, name, refs.left, result)
+        ltn: Lsp.on_hover.find_ref.go(offset, name, refs.left, result)
+        gtn: Lsp.on_hover.find_ref.go(offset, name, refs.right, result)
+      }
+  }
+
+// Lsp.on_hover.find_ref(
+//   offset: Nat
+//   refs:   List<Lsp.Hover.Ref>
+// ): Maybe<Lsp.Hover.Ref>
+//   Lsp.on_hover.find_ref.go(offset, refs, none)
+
+// Lsp.on_hover.find_ref.go(
+//   offset: Nat
+//   refs:   List<Lsp.Hover.Ref>
+//   result: Maybe<Lsp.Hover.Ref>
+// ): Maybe<Lsp.Hover.Ref>
+//   case refs {
+//     nil: result
+//     cons: 
+//       let ref = refs.head
+//       let ref_orig = ref@orig
+
+//       if Maybe.if!((x) Nat.between(x@fst, offset, x@snd), ref_orig)then
+//         case result {
+//           none: Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
+//           some:
+//             let res_orig = result.value@orig
+//             case ref_orig res_orig {
+//               none none: Lsp.on_hover.find_ref.go(offset, refs.tail, result)
+//               none some: Lsp.on_hover.find_ref.go(offset, refs.tail, result)
+//               some none: Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
+//               some some: 
+//                 let res_orig = res_orig.value
+//                 let ref_orig = ref_orig.value
+
+//                 if ref_orig@fst >? res_orig@fst then
+//                   Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
+//                 else if ref_orig@snd <? res_orig@snd then
+//                   Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
+//                 else if (ref_orig@fst =? res_orig@fst) && (ref_orig@snd =? res_orig@snd) then
+//                   Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
+//                 else 
+//                   Lsp.on_hover.find_ref.go(offset, refs.tail, result)
+//             }
+//         }
+//       else
+//         Lsp.on_hover.find_ref.go(offset, refs.tail, result)
+//   }
+
+// SHOW
+// ============================
+
+// show a reference orig
+Lsp.on_hover.show.orig(orig: Lsp.Hover.Orig): String
   case orig {
-    none: "none",
+    none: "",
     some: open orig.value Nat.show(orig.value.fst) | "-" | Nat.show(orig.value.snd)
   }
+
+// show a term name
+Lsp.on_hover.show.term_name(term: Kind.Term): String
+  let res = case term {
+    ref: term.name
+    var: term.name
+    all: term.name
+    lam: term.name
+    let: term.name
+    def: term.name
+    gol: term.name
+    cse: term.name
+    app: Kind.Term.show(term.func)
+  } default ""
+  
+  // add ': ' if got some name
+  case res {
+    nil: ""
+    cons: res | ": "
+  }
+
+Lsp.on_hover.show.type(type: Maybe<Kind.Term>): String
+  Maybe.map!!((t) Kind.Term.show(t), type) <> ""
+
+// show one reference
+Lsp.on_hover.show.ref(name: Kind.Name, type: Kind.Term): String
+  name | ": " |
+  Lsp.on_hover.show.type(some(type))
+
+// Lsp.on_hover.show.ref(ref: Lsp.Hover.Ref): String
+//   open ref
+  
+//   Kind.Term.show(ref.term) | " // " |
+//   Lsp.on_hover.show.term_name(ref.term) | 
+//   Lsp.on_hover.show.type(ref.type) | " " |
+//   Lsp.on_hover.show.orig(ref.orig)

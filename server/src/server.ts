@@ -13,7 +13,7 @@ import {
   Diagnostic,
 } from "vscode-languageserver";
 import { DiagnosticSeverity } from "vscode-languageserver";
-import { TextDocument } from "vscode-languageserver-textdocument";
+import { Position, TextDocument } from "vscode-languageserver-textdocument";
 import {
   computeDiagnostics,
   listToArray,
@@ -24,92 +24,16 @@ import {
 import { listFiles, loadFromFilesystem, stripFileProtocol, uri } from "./files";
 const fm = require("./kind.js");
 
-const ADD_PATH = find_base_dir();
+// global variables
+let sources   = new Map<uri, TextDocument>();
+let kind_defs = fm["BitsMap.new"]; /* Fm.Defs */
+let lsp_defs  = fm["BBT.tip"]; /* Fm.Defs */
+
 // connection handles messages between this LSP server and the client.
 let connection = createConnection(ProposedFeatures.all);
 
-let sources = new Map<uri, TextDocument>();
-let defs = fm["BitsMap.new"]; /* Fm.Defs */
-
-let initialCheck = false;
-
-connection.onInitialized(async () => {
-  // for (const workspace of workspaceFolders) {
-  //   // Load all sources under each of the workspaces.
-  //   console.log(`checking workspace: ${workspace.name}`);
-  //   let workspaceFiles = await listFiles(stripFileProtocol(workspace.uri));
-  //   let sourceFiles = workspaceFiles.filter((file) => file.endsWith(".kind"));
-  //   // Read all source files into memory.
-  //   for (const filename of sourceFiles) {
-  //     let doc = await loadFromFilesystem(filename);
-  //     sources.set(filename, doc);
-  //     // TODO(simon): Parse files in parallel using a pool of workers as this
-  //     // is CPU-bound.
-  //     const parsed = parse(filename, doc.getText());
-  //     switch (parsed._) {
-  //       case "Parser.Reply.value":
-  //         console.log(`parsed ${filename}`);
-  //         defs = fm["BitsMap.union"](parsed.val)(defs);
-  //         break;
-  //       case "Parser.Reply.error":
-  //         console.log(`parse error: ${parsed.err}`);
-  //         // Send parse errors to the UI.
-  //         connection.sendDiagnostics({
-  //           uri: doc.uri,
-  //           diagnostics: [
-  //             {
-  //               severity: DiagnosticSeverity.Error,
-  //               range: {
-  //                 start: doc.positionAt(Number(parsed.idx)),
-  //                 end: doc.positionAt(Number(parsed.idx)),
-  //               },
-  //               message: parsed.err,
-  //               source: "Kind",
-  //             },
-  //           ],
-  //           version: doc.version,
-  //         });
-  //         break;
-  //       default:
-  //         throw "unhandled case";
-  //     }
-  //   }
-  //   const names = fm["List.mapped"](fm["BitsMap.keys"](defs))(
-  //     fm["Kind.Name.from_bits"]
-  //   );
-  //   const start = process.hrtime.bigint();
-  //   console.log(`checking`);
-  //   try {
-  //     defs = fm["IO.purify"](fm["Kind.Synth.many"](names)(defs));
-  //   } catch(err) {
-  //     console.log("couldn't check :(")
-  //   }
-  //   console.log(
-  //     `synth took ${Number(process.hrtime.bigint() - start) / 1e6}ms`
-  //   );
-  //   const report = fm["Lsp.diagnostics"](defs);
-  //   // Display an initial set of diagnostics.
-  //   let diagnostics = computeDiagnostics(
-  //     report,
-  //     (x) => documents.get(x),
-  //     sources,
-  //     defs
-  //   );
-  //   for (const [uri, diag] of diagnostics.entries()) {
-  //     connection.sendDiagnostics({ uri: uri, diagnostics: diag, version: 0 });
-  //   }
-  //   initialCheck = true;
-  // }
-});
-
-var workspaceFolders: WorkspaceFolder[];
-
+// Notify the LSP client what capabilities this server provides.
 connection.onInitialize(async (params) => {
-  if (params.workspaceFolders) {
-    workspaceFolders = params.workspaceFolders;
-  }
-
-  // Notify the LSP client what capabilities this server provides.
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -156,7 +80,8 @@ function resolveDiagnostics(
   documents: TextDocuments<TextDocument>,
   defs_array: any
 ): Map<uri, Diagnostic[]> {
-  const diagnostics_array: LspResponse[] = listToArray<LspResponse>(diagnostics);
+  const diagnostics_array: LspResponse[] =
+    listToArray<LspResponse>(diagnostics);
 
   const result = new Map<uri, Diagnostic[]>();
   const files_diagnostics_map = new Map<uri, LspResponse[]>();
@@ -168,7 +93,9 @@ function resolveDiagnostics(
     const s_uri = !uri.startsWith("file://") ? "file://".concat(uri) : uri;
     const doc = documents.get(s_uri);
     const diagnostics = result.get(uri) ?? [];
-    const new_diagnostics = diagnostics.concat(lspResponseToDiagnostic(doc!, diagnostic));
+    const new_diagnostics = diagnostics.concat(
+      lspResponseToDiagnostic(doc!, diagnostic)
+    );
     files_diagnostics_map.set(diagnostic.file, upd);
     result.set(uri, new_diagnostics);
   }
@@ -189,13 +116,13 @@ documents.onDidChangeContent(async (change) => {
   const uri = change.document.uri;
   const s_uri = uri.startsWith("file://") ? uri.substr(7) : uri;
   const code = change.document.getText();
+  const response = await fm.run(fm["Lsp.on_change"](s_uri)(code)(kind_defs));
 
-  const pair = await fm.run(fm["Lsp.on_change"](s_uri)(code)(defs));
+  const diagnostics = response.diagnostics;
+  kind_defs = response.kind_defs;
+  lsp_defs = response.lsp_defs;
 
-  const diagnostics = pair.fst;
-  defs = pair.snd;
-
-  const defs_array = listToArray(fm["BitsMap.values"](defs));
+  const defs_array = listToArray(fm["BitsMap.values"](kind_defs));
 
   const result = resolveDiagnostics(diagnostics, documents, defs_array);
 
@@ -229,7 +156,7 @@ connection.onDefinition((what) => {
   }
   const offset = doc.offsetAt(what.position);
 
-  let maybe = fm["Lsp.definition"](uri)(offset)(defs);
+  let maybe = fm["Lsp.definition"](uri)(offset)(kind_defs);
   if (maybe._ == "Maybe.none") {
     return null;
   }
@@ -256,6 +183,27 @@ connection.onDefinition((what) => {
   ];
 });
 
+function getHoveredWord(text: string, offset: number): string | undefined {
+  const isSpace = (c: string) => /\s|\(|\)|\{|\}|<|>|,|!/.exec(c);
+  let result = "";
+  let lft = offset - 1;
+  let rgt = offset;
+
+  while (lft >= 0 && !isSpace(text[lft])) {
+    result = text[lft] + result;
+    lft -= 1;
+  }
+  lft = Math.max(0, lft + 1);
+
+  while (rgt < text.length && !isSpace(text[rgt])) {
+    result = result + text[rgt];
+    rgt += 1;
+  }
+  rgt = Math.max(lft, rgt);
+
+  return result === "" ? undefined : result;
+}
+
 connection.onHover((params: HoverParams) => {
   console.log(
     `hover request for ${params.textDocument.uri} position ${params.position.line} ${params.position.character}`
@@ -268,39 +216,33 @@ connection.onHover((params: HoverParams) => {
     console.log(`document not found: ${uri}`);
     return null;
   }
+  const doc_text = doc.getText();
   const offset = doc.offsetAt(params.position);
-
-  let maybe = fm["Lsp.on_hover"](uri)(offset)(defs);
-  if (maybe._ == "Maybe.none") {
+  const name = getHoveredWord(doc_text, offset);
+  if (name == undefined) {
+    console.log("word not found");
     return null;
   }
-
-  const list = listToArray(maybe);
-
-  const validSources = list.filter((x: any) => x.orig.value != undefined);
-
-  const matches = validSources.filter(
-    (x: any) => offset >= x.orig.value.fst && offset < x.orig.value.snd
-  );
-
-  if (matches.length == 0) return null;
-
-  const messages = new Set<String>();
-
-  matches
-    .map((x) => display(x))
-    .filter((x) => x.length > 0)
-    // de-duplicate - this can happen in '_' cases of case expressions.
-    .forEach((x) => messages.add(x));
-
-  if (messages.size == 0) return null;
+  let hover_refs = fm["Lsp.on_hover"](uri)(offset)(name)(lsp_defs);
+  if (hover_refs._ == "Maybe.none") {
+    return null;
+  } else {
+    hover_refs = hover_refs.value;
+  }
 
   let markdown: MarkupContent = {
     kind: MarkupKind.Markdown,
-    value: Array.from(messages.values()).join("\n"),
+    value: markdown_typescript_wrapper(hover_refs),
   };
   return { contents: markdown };
 });
+
+function markdown_typescript_wrapper(str: string): string {
+  return `
+\`\`\`typescript
+${str}
+\`\`\`\n`;
+}
 
 function display(f: any): string {
   if (f.term._ == "Kind.Term.app") return "";
@@ -349,7 +291,7 @@ connection.onCompletion(
   (position: TextDocumentPositionParams): CompletionItem[] =>
     listToArray(
       fm["Lsp.on_completions"](position.textDocument.uri)(position.position)(
-        defs
+        kind_defs
       )
     )
 );

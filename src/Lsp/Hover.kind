@@ -15,7 +15,7 @@ type Lsp.Hover.Ref {
 }
 
 Lsp.Hover.Result: Type
-  Pair<Kind.Term, List<Lsp.Hover.Ref>>
+  Pair<Kind.Term, Lsp.Defs.Map>
 
 // type Lsp.Hover.Result<A: Type> {
 //   new(
