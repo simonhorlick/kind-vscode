@@ -1,6 +1,6 @@
-import { promises as fs } from "fs";
-import * as path from "path";
-import { TextDocument } from "vscode-languageserver-textdocument";
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 
 export type uri = string;
 
@@ -9,16 +9,16 @@ export type uri = string;
 export async function listFiles(p: string): Promise<string[]> {
   const entries = await fs.readdir(p, { withFileTypes: true });
 
-  var result: string[] = [];
+  let result: string[] = [];
 
   const files = entries
     .filter((entry) => !entry.isDirectory())
-    .map((file) => "file://" + path.join(p, file.name));
+    .map((file) => `file://${path.join(p, file.name)}`);
 
   const dirs = entries.filter((entry) => entry.isDirectory());
 
   for (const directory of dirs) {
-    var d = await listFiles(path.join(p, directory.name));
+    const d = await listFiles(path.join(p, directory.name));
     result = result.concat(d);
   }
 
@@ -30,7 +30,7 @@ export async function listFiles(p: string): Promise<string[]> {
 // stripFileProtocol strips the protocol prefix from the uri if it is the
 // file: protocol. If not the uri is returned unchanged.
 export function stripFileProtocol(uri: string): string {
-  const fileProtocolPrefix = "file://";
+  const fileProtocolPrefix = 'file://';
   if (uri.startsWith(fileProtocolPrefix)) {
     return uri.substr(fileProtocolPrefix.length);
   }
@@ -39,6 +39,6 @@ export function stripFileProtocol(uri: string): string {
 
 // loadFromFilesystem creates a `TextDocument` from a local uri.
 export async function loadFromFilesystem(uri: uri): Promise<TextDocument> {
-  const content = await fs.readFile(stripFileProtocol(uri), "utf8");
-  return TextDocument.create(uri, "kind", 0, content);
+  const content = await fs.readFile(stripFileProtocol(uri), 'utf8');
+  return TextDocument.create(uri, 'kind', 0, content);
 }
