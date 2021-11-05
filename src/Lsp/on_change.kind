@@ -1,4 +1,4 @@
-type Lsp.Change {
+type Lsp.Change.Result {
   new(
     diagnostics: List<Lsp.Diagnostic>
     kind_defs: Kind.Defs
@@ -6,7 +6,7 @@ type Lsp.Change {
   )
 }
 
-Lsp.on_change(file: String, code: String, defs: Kind.Defs): IO<Lsp.Change>
+Lsp.on_change(file: String, code: String, defs: Kind.Defs): IO<Lsp.Change.Result>
   IO {
     get result = Lsp.Check.file(file, code, defs)
     let {diagnostics, defs} = result

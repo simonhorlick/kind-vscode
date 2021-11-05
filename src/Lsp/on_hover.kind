@@ -1,22 +1,3 @@
-// where the mouse is at the document
-Lsp.Hover.Orig: Type
-  Maybe<Pair<Nat,Nat>>
-
-// A hover reference
-// orig: where the mouse is at the document
-// term: the term hovered
-// type: type of the term hovered
-type Lsp.Hover.Ref {
-  new(
-    orig: Lsp.Hover.Orig,
-    term: Kind.Term,
-    type: Maybe<Kind.Term>,
-  )
-}
-
-Lsp.Hover.Result: Type
-  Pair<Kind.Term, List<Lsp.Hover.Ref>>
-
 // on_hover looks up what appears in the source file `uri` at the given
 // `offset` and returns information about the term.
 Lsp.on_hover(
@@ -79,55 +60,11 @@ Lsp.on_hover.find_ref.go(
       }
   }
 
-// Lsp.on_hover.find_ref(
-//   offset: Nat
-//   refs:   List<Lsp.Hover.Ref>
-// ): Maybe<Lsp.Hover.Ref>
-//   Lsp.on_hover.find_ref.go(offset, refs, none)
-
-// Lsp.on_hover.find_ref.go(
-//   offset: Nat
-//   refs:   List<Lsp.Hover.Ref>
-//   result: Maybe<Lsp.Hover.Ref>
-// ): Maybe<Lsp.Hover.Ref>
-//   case refs {
-//     nil: result
-//     cons: 
-//       let ref = refs.head
-//       let ref_orig = ref@orig
-
-//       if Maybe.if!((x) Nat.between(x@fst, offset, x@snd), ref_orig)then
-//         case result {
-//           none: Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
-//           some:
-//             let res_orig = result.value@orig
-//             case ref_orig res_orig {
-//               none none: Lsp.on_hover.find_ref.go(offset, refs.tail, result)
-//               none some: Lsp.on_hover.find_ref.go(offset, refs.tail, result)
-//               some none: Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
-//               some some: 
-//                 let res_orig = res_orig.value
-//                 let ref_orig = ref_orig.value
-
-//                 if ref_orig@fst >? res_orig@fst then
-//                   Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
-//                 else if ref_orig@snd <? res_orig@snd then
-//                   Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
-//                 else if (ref_orig@fst =? res_orig@fst) && (ref_orig@snd =? res_orig@snd) then
-//                   Lsp.on_hover.find_ref.go(offset, refs.tail, some(ref))
-//                 else 
-//                   Lsp.on_hover.find_ref.go(offset, refs.tail, result)
-//             }
-//         }
-//       else
-//         Lsp.on_hover.find_ref.go(offset, refs.tail, result)
-//   }
-
 // SHOW
 // ============================
 
 // show a reference orig
-Lsp.on_hover.show.orig(orig: Lsp.Hover.Orig): String
+Lsp.on_hover.show.orig(orig: Lsp.Check.Orig): String
   case orig {
     none: "",
     some: open orig.value Nat.show(orig.value.fst) | "-" | Nat.show(orig.value.snd)
@@ -161,10 +98,3 @@ Lsp.on_hover.show.ref(name: Kind.Name, type: Kind.Term): String
   name | ": " |
   Lsp.on_hover.show.type(some(type))
 
-// Lsp.on_hover.show.ref(ref: Lsp.Hover.Ref): String
-//   open ref
-  
-//   Kind.Term.show(ref.term) | " // " |
-//   Lsp.on_hover.show.term_name(ref.term) | 
-//   Lsp.on_hover.show.type(ref.type) | " " |
-//   Lsp.on_hover.show.orig(ref.orig)

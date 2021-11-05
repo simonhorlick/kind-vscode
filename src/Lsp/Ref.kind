@@ -2,13 +2,12 @@ type Lsp.Ref {
   new(
     // The source range.
     range: Pair(Nat, Nat),
-
     // The definition this term references.
     name: String,
   )
 }
 
-Lsp.refs.go(term: Kind.Term, start: Nat, end: Nat)
+Lsp.Ref.find.go(term: Kind.Term, start: Nat, end: Nat)
   : List(Lsp.Ref)
   // Traverse the tree of Kind.Terms and collect any refs. If we come across
   // a Kind.Term.orig then we use that for the direct child.
@@ -23,38 +22,38 @@ Lsp.refs.go(term: Kind.Term, start: Nat, end: Nat)
     typ: []
 
     all:
-      let type = Lsp.refs.go(term.xtyp, 0, 0)
-      let body = Lsp.refs.go(
+      let type = Lsp.Ref.find.go(term.xtyp, 0, 0)
+      let body = Lsp.Ref.find.go(
         term.body(
           Kind.Term.var(term.self, 0),
           Kind.Term.var(term.name, 0)
         ), 0, 0)
       List.concat!(type, body)
 
-    lam: Lsp.refs.go(term.body(Kind.Term.var(term.name, 0)), 0, 0)
+    lam: Lsp.Ref.find.go(term.body(Kind.Term.var(term.name, 0)), 0, 0)
 
     app:
-        let func = Lsp.refs.go(term.func, 0, 0)
-        let argm = Lsp.refs.go(term.argm, 0, 0)
+        let func = Lsp.Ref.find.go(term.func, 0, 0)
+        let argm = Lsp.Ref.find.go(term.argm, 0, 0)
         List.concat!(func, argm)
 
     let:
-      let expr = Lsp.refs.go(term.expr, 0, 0)
-      let body = Lsp.refs.go(
+      let expr = Lsp.Ref.find.go(term.expr, 0, 0)
+      let body = Lsp.Ref.find.go(
         term.body(Kind.Term.var(term.name, 0)),
         0, 0)
       List.concat!(expr, body)
 
     def:
-      let expr = Lsp.refs.go(term.expr, 0, 0)
-      let body = Lsp.refs.go(
+      let expr = Lsp.Ref.find.go(term.expr, 0, 0)
+      let body = Lsp.Ref.find.go(
         term.body(Kind.Term.var(term.name, 0)),
         0, 0)
       List.concat!(expr, body)
 
     ann:
-      let term = Lsp.refs.go(term.term, 0, 0)
-      let type = Lsp.refs.go(term.type, 0, 0)
+      let term = Lsp.Ref.find.go(term.term, 0, 0)
+      let type = Lsp.Ref.find.go(term.type, 0, 0)
       List.concat!(term, type)
 
     gol: []
@@ -74,8 +73,8 @@ Lsp.refs.go(term: Kind.Term, start: Nat, end: Nat)
             case defn.type {
               none: []
               some:
-                let type = Lsp.refs.go(defn.type.value, 0, 0)
-                let term = Lsp.refs.go(defn.term, 0, 0)
+                let type = Lsp.Ref.find.go(defn.type.value, 0, 0)
+                let term = Lsp.Ref.find.go(defn.term, 0, 0)
                 List.concat!(term, type)
             }
         }))
@@ -83,19 +82,19 @@ Lsp.refs.go(term: Kind.Term, start: Nat, end: Nat)
       let cses = BitsMap.to_list!(term.cses);
       let cses = List.flatten!(List.mapped!(cses)!(
         (x)
-          Lsp.refs.go(Pair.snd!!(x), 0, 0)
+          Lsp.Ref.find.go(Pair.snd!!(x), 0, 0)
       ));
 
       let moti = case term.moti {
         none: [],
-        some: Lsp.refs.go(term.moti.value, 0, 0),
+        some: Lsp.Ref.find.go(term.moti.value, 0, 0),
       };
 
-      let expr = Lsp.refs.go(term.expr, 0, 0)
+      let expr = Lsp.Ref.find.go(term.expr, 0, 0)
       List.concat!(wyth, List.concat!(cses, List.concat!(moti, expr)))
 
     ori:
-      Lsp.refs.go(
+      Lsp.Ref.find.go(
         term.expr,
         Pair.fst!!(term.orig),
         Pair.snd!!(term.orig))
@@ -106,11 +105,11 @@ Lsp.refs.go(term: Kind.Term, start: Nat, end: Nat)
     ope: []
   }
 
-// refs lists all of the names that the given Def references along with the
+// find lists all of the names that the given Def references along with the
 // source location of the name.
-Lsp.refs(d: Kind.Def): List(Lsp.Ref)
+Lsp.Ref.find(d: Kind.Def): List(Lsp.Ref)
   open d
   List.concat!(
-    Lsp.refs.go(d.term, 0, 0),
-    Lsp.refs.go(d.type, 0, 0),
+    Lsp.Ref.find.go(d.term, 0, 0),
+    Lsp.Ref.find.go(d.type, 0, 0),
   )

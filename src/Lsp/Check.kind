@@ -1,3 +1,26 @@
+// A reference after check
+// orig: where the mouse is at the document
+// term: the term hovered
+// type: type of the term hovered
+type Lsp.Check.Ref {
+  new(
+    orig: Lsp.Check.Orig,
+    term: Kind.Term,
+    type: Maybe(Kind.Term),
+  )
+}
+
+// term's origin
+Lsp.Check.Orig: Type
+  Maybe<Pair<Nat,Nat>>
+
+// result of lsp typecheck
+Lsp.Check.Result: Type
+  Pair<Kind.Term, Lsp.Defs.Map>
+
+// one lsp definition
+// the difference about this and kind def is
+// the refs map
 type Lsp.Check.Def {
   new(
     file: String
@@ -10,6 +33,7 @@ type Lsp.Check.Def {
   )
 }
 
+// map of lsp def's
 Lsp.Check.Defs: Type
   Map<Lsp.Check.Def>
 
@@ -173,7 +197,7 @@ Lsp.check(
   path: Kind.Path.Maybe.Builder
   orig: Maybe<Pair<Nat,Nat>>
   refs: Lsp.Defs.Map
-): Kind.Check<Lsp.Hover.Result>
+): Kind.Check<Lsp.Check.Result>
   // log(List.show!((x) x@fst | ": " | Kind.Term.show(x@snd), ctx))
   Kind.Check {
     get pair = case term {
@@ -458,13 +482,13 @@ Lsp.check(
 Lsp.on_hover.build_result(
   type: Maybe<Kind.Term>, 
   refs: Lsp.Defs.Map
-): Maybe<Lsp.Hover.Result>
+): Maybe<Lsp.Check.Result>
   case type {
     none: none
-    some: some( {type.value, refs} )
+    some: some( {type.value, refs} :: Lsp.Check.Result )
   }
 
-Lsp.Term.check.direct(term: Kind.Term, defs: Kind.Defs, refs: Lsp.Defs.Map): Kind.Check<Lsp.Hover.Result>
+Lsp.Term.check.direct(term: Kind.Term, defs: Kind.Defs, refs: Lsp.Defs.Map): Kind.Check<Lsp.Check.Result>
   Kind.Check {
     get pair = Lsp.check(term, none, defs, [], Kind.Path.Maybe.Builder.nil, none, refs)
     let {_, refs} = pair
@@ -476,12 +500,12 @@ Lsp.check.patch(
   type: Maybe<Kind.Term>, 
   path: Kind.Path.Maybe.Builder
   refs: Lsp.Defs.Map
-): Kind.Check<Lsp.Hover.Result>
+): Kind.Check<Lsp.Check.Result>
   Kind.Check {
     Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.patch(Kind.Path.Maybe.Builder.to_bits(path), term)])
   }
 
-Lsp.Term.check.cant_infer(term: Kind.Term, type: Maybe(Kind.Term), ctx: Kind.Context, orig: Maybe<Pair<Nat,Nat>>, refs: Lsp.Defs.Map): Kind.Check<Lsp.Hover.Result>
+Lsp.Term.check.cant_infer(term: Kind.Term, type: Maybe(Kind.Term), ctx: Kind.Context, orig: Maybe<Pair<Nat,Nat>>, refs: Lsp.Defs.Map): Kind.Check<Lsp.Check.Result>
   Kind.Check {
     Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.cant_infer(orig, term, ctx)])
   }

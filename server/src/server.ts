@@ -99,7 +99,7 @@ connection.onDefinition((what) => {
   }
   const offset = doc.offsetAt(what.position);
 
-  const maybe = kind["Lsp.definition"](uri)(offset)(kind_defs);
+  const maybe = kind["Lsp.on_definition"](uri)(offset)(kind_defs);
   if (maybe._ == "Maybe.none") {
     return null;
   }

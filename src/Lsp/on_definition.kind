@@ -1,7 +1,7 @@
 // definition looks up what appears in the source file `uri` at the given
 // `offset`. If there is a Kind.Term.ref spanning that location then the
 // definition of that term is returned.
-Lsp.definition(
+Lsp.on_definition(
   uri: String,
   offset: Nat,
   defs: Kind.Defs
@@ -9,7 +9,7 @@ Lsp.definition(
   let ds = Lsp.defs(defs, uri)
 
   // For each def in `uri` find all the definitions that it references.
-  let references = List.flatten!(List.map!!((x) Lsp.refs(x), ds))
+  let references = List.flatten!(List.map!!((x) Lsp.Ref.find(x), ds))
 
   // Find references that span the requested offset.
   let matches = List.filter!((x)
