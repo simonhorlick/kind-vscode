@@ -1,0 +1,88 @@
+// on_hover looks up what appears in the source file `uri` at the given
+// `offset` and returns information about the term.
+Lsp.on_hover(
+  uri: String
+  offset: Nat
+  name: Kind.Name
+  lsp_defs: Lsp.Check.Defs
+): Maybe<String>
+  let lsp_defs = Map.values!(lsp_defs)
+  // All definitions contained in hovered file
+  let file_defs = List.filter!((d) String.ends_with(uri, d@file), lsp_defs)
+
+  // The definition that contains the hovered term
+  let lsp_def = List.find!(Lsp.on_hover.find.offset_in_def(offset), file_defs)
+  
+  Maybe {
+    get lsp_def = lsp_def
+    get type    = Lsp.on_hover.find_ref(offset, name, lsp_def@refs)
+    return Lsp.on_hover.show.ref(name, type)
+  }
+
+// FINDS
+// ================================
+
+// find which definition contains offset
+Lsp.on_hover.find.offset_in_def(offset: Nat, lsp_def: Lsp.Check.Def): Bool
+  open lsp_def
+  Nat.between(lsp_def.orig@fst, offset, lsp_def.orig@snd)
+
+// find which term (ref) of definition contains offset
+Lsp.on_hover.find_ref(
+  offset: Nat
+  name: Kind.Name
+  refs: Lsp.Defs.Map
+): Maybe<Kind.Term>
+ Lsp.on_hover.find_ref.go(offset, name, refs, none) 
+
+Lsp.on_hover.find_ref.go(
+  offset: Nat
+  name: Kind.Name
+  refs: Lsp.Defs.Map
+  result: Maybe<Kind.Term>
+): Maybe<Kind.Term>
+  Maybe {
+    get pile = refs{name}
+    get value = List.find!( (x) open x; Nat.between(x.fst@fst, offset ,x.fst@snd),  pile)
+    let type = value@snd
+    return type
+  }
+
+// SHOW
+// ============================
+
+// show a reference orig
+Lsp.on_hover.show.orig(orig: Lsp.Check.Orig): String
+  case orig {
+    none: "",
+    some: open orig.value Nat.show(orig.value.fst) | "-" | Nat.show(orig.value.snd)
+  }
+
+// show a term name
+Lsp.on_hover.show.term_name(term: Kind.Term): String
+  let res = case term {
+    ref: term.name
+    var: term.name
+    all: term.name
+    lam: term.name
+    let: term.name
+    def: term.name
+    gol: term.name
+    cse: term.name
+    app: Kind.Term.show(term.func)
+  } default ""
+  
+  // add ': ' if got some name
+  case res {
+    nil: ""
+    cons: res | ": "
+  }
+
+Lsp.on_hover.show.type(type: Maybe<Kind.Term>): String
+  Maybe.map!!((t) Kind.Term.show(t), type) <> ""
+
+// show one reference
+Lsp.on_hover.show.ref(name: Kind.Name, type: Kind.Term): String
+  name | ": " |
+  Lsp.on_hover.show.type(some(type))
+

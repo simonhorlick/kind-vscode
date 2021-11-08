@@ -1,0 +1,15 @@
+type Lsp.Change.Result {
+  new(
+    diagnostics: List<Lsp.Diagnostic>
+    kind_defs: Kind.Defs
+    lsp_defs:  Lsp.Check.Defs
+  )
+}
+
+Lsp.on_change(file: String, code: String, defs: Kind.Defs): IO<Lsp.Change.Result>
+  IO {
+    get result = Lsp.Check.file(file, code, defs)
+    let {diagnostics, defs} = result
+    let {kind_defs, lsp_defs} = defs
+    return {diagnostics, kind_defs, lsp_defs}
+  }

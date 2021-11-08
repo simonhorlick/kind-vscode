@@ -1,0 +1,33 @@
+Lsp.Defs.Map.Value: Type
+  Pair<Pair<Nat, Nat>, Kind.Term>
+
+Lsp.Defs.Map: Type
+  Map<List<Lsp.Defs.Map.Value>>
+
+Lsp.Defs.Map.set(
+  name: Kind.Name
+  orig: Lsp.Check.Orig
+  type: Kind.Term
+  refs: Lsp.Defs.Map 
+): Lsp.Defs.Map
+  Maybe {
+    get orig = orig
+    let pile = refs{name}
+    case pile {
+      none: Maybe {
+        return Map.set!(name, [{orig, type}], refs)
+      }
+      some: Maybe {
+        return Map.set!(name, {orig, type} & pile.value, refs)
+      }
+    }
+  } <> refs
+
+Lsp.defs(defs: Kind.Defs, uri: String): List(Kind.Def)
+  let values = BitsMap.values!(defs)
+  List.filter!(
+    (d)
+      open d; 
+      String.ends_with(uri, d.file),
+      values
+  )

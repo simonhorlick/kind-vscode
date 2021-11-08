@@ -1,0 +1,136 @@
+// Diagnostic is a compiler error or warning with an associated source range.
+type Lsp.Diagnostic {
+  new(
+    message: String,
+    severity: U32, // A Lsp.Diagnosticeverity.
+    file: String,
+    from: U32,
+    upto: U32,
+  )
+}
+
+// ===================================
+// Severity constants
+Lsp.Diagnostic.Severity.Error: U32
+  1u
+
+Lsp.Diagnostic.Severity.Warning: U32
+  2u
+
+Lsp.Diagnostic.Severity.Information: U32
+  3u
+
+Lsp.Diagnostic.Severity.Hint: U32
+  4u
+
+// =================================
+// Helper functions
+
+// severity maps an error type to a diagnostic severity. This controls how the
+// diagnostic is displayed in the UI.
+Lsp.severity(err: Kind.Error): U32
+  case err {
+    type_mismatch: Lsp.Diagnostic.Severity.Error,
+    waiting: Lsp.Diagnostic.Severity.Information,
+    indirect: Lsp.Diagnostic.Severity.Information,
+    show_goal: Lsp.Diagnostic.Severity.Warning,
+    patch: Lsp.Diagnostic.Severity.Information,
+    undefined_reference: Lsp.Diagnostic.Severity.Error,
+    cant_infer: Lsp.Diagnostic.Severity.Error,
+  }
+
+// make_report collects typechecking errors from the provided definitions.
+Lsp.Diagnostic.make_report(
+  defs: Kind.Defs,
+  names: List<Kind.Name>
+): Lsp.Report
+  Lsp.Diagnostic.make_report.go(defs, names, [], [])
+
+Lsp.Diagnostic.make_report.go(
+    defs: Kind.Defs,
+    names: List<Kind.Name>,
+    errs: List<Pair<String, Kind.Error>>,
+    typs: List<Pair<Kind.Name, Kind.Term>>
+): Lsp.Report
+  case names {
+    // Base-case. We've handled all the definitions so return all of the errors.
+    nil: Lsp.Report.new(typs, errs),
+
+    cons:
+      let name = names.head;
+
+      // Get the top-level definition `name` from `defs`.
+      case Kind.Map.get!(name, defs) as got {
+        none: Lsp.Diagnostic.make_report.go(defs, names.tail, errs, typs),
+        some: 
+          open got.value as def
+          let typs = List.append!(typs, {name, def.type})
+
+          // Inspect the typechecking status of this term, if typechecking
+          // failed then report it.
+          case def.stat {
+            init: Lsp.Diagnostic.make_report.go(defs, names.tail, errs, typs),
+            wait: Lsp.Diagnostic.make_report.go(defs, names.tail, errs, typs),
+            done: Lsp.Diagnostic.make_report.go(defs, names.tail, errs, typs),
+
+            // Retrieve the list of typechecking errors attached to this term.
+            fail: case def.stat.errors {
+              nil: Lsp.Diagnostic.make_report.go(defs, names.tail, errs, typs),
+              cons:
+                let rel_errs = def.stat.errors // TODO which are the relevant errors?
+                case rel_errs {
+                  nil:
+                    Lsp.Diagnostic.make_report.go(defs, names.tail, errs, typs),
+                  cons:
+                    let added_errs = List.concat!(
+                      errs,
+                      List.map!!((e) {def.file, e}, rel_errs));
+                    Lsp.Diagnostic.make_report.go(defs, names.tail, added_errs,
+                      typs)
+                }
+            }
+        }
+      }
+  }
+
+// check maps any typechecking errors to Diagnostic.
+Lsp.Diagnostic.build(
+  defs: Kind.Defs
+): List(Lsp.Diagnostic)
+  // TODO: Return a Map(uri, Diagnostic[]) that contains a key for every uri
+  // we know about - it's important that we send back empty Diagnostic for
+  // files that have no errors to display.
+  let names = [ Kind.Name.from_bits(x) for x in BitsMap.keys!(defs) ]
+
+  // Collect any errors from typechecking.
+  let report = Lsp.Diagnostic.make_report(defs, names)
+  open report
+
+  // Attach source locations, if available.
+  // FIXME: goals do not have source locations.
+  List.mapped!(report.errors)!(
+    (pair)
+      open pair
+      let uri = pair.fst
+      let err = pair.snd
+      case Kind.Error.origin(err) as origin {
+        none:
+          Lsp.Diagnostic.new(
+            Kind.Error.show(err, defs),
+            Lsp.severity(err),
+            uri,
+            0u,
+            0u)
+        some: case origin.value {
+          new:
+            let from = Nat.to_u32(origin.value.fst)
+            let upto = Nat.to_u32(origin.value.snd)
+            Lsp.Diagnostic.new(
+              Kind.Error.show(err, defs),
+              Lsp.severity(err),
+              uri,
+              from,
+              upto)
+        },
+      }
+  )

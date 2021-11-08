@@ -1,0 +1,502 @@
+// A reference after check
+// orig: where the mouse is at the document
+// term: the term hovered
+// type: type of the term hovered
+type Lsp.Check.Ref {
+  new(
+    orig: Lsp.Check.Orig,
+    term: Kind.Term,
+    type: Maybe(Kind.Term),
+  )
+}
+
+// term's origin
+Lsp.Check.Orig: Type
+  Maybe<Pair<Nat,Nat>>
+
+// result of lsp typecheck
+Lsp.Check.Result: Type
+  Pair<Kind.Term, Lsp.Defs.Map>
+
+// one lsp definition
+// the difference about this and kind def is
+// the refs map
+type Lsp.Check.Def {
+  new(
+    file: String
+    code: String
+    orig: Pair<Nat Nat>
+    name: Kind.Name
+    term: Kind.Term
+    type: Kind.Term
+    refs: Lsp.Defs.Map
+  )
+}
+
+// map of lsp def's
+Lsp.Check.Defs: Type
+  Map<Lsp.Check.Def>
+
+Lsp.Check.file(file: String, code: String, defs: Kind.Defs): IO<Pair<List<Lsp.Diagnostic>, Pair<Kind.Defs, Lsp.Check.Defs>>>
+  IO {
+    get loaded = Lsp.Synth.file(file, code, defs)
+    case loaded {
+      left: IO {
+        return { [loaded.value], {BitsMap.new!, {}} }
+      }
+      right: case loaded.value {
+        new: IO {
+          let nams = loaded.value.fst
+          let defs = loaded.value.snd
+          let kind_defs = defs@fst
+          let lsp_defs  = defs@snd
+          case nams {
+            nil: 
+              let err = "File not found or empty: '" | file | "'."
+              let diagnostic = Lsp.Diagnostic.new(
+                err,
+                Lsp.Diagnostic.Severity.Error,
+                file,
+                0,
+                2
+              )
+              IO { return { [diagnostic], {kind_defs, lsp_defs} } }
+            cons: IO {
+              let diagnostics = Lsp.Diagnostic.build(kind_defs)
+              Kind.Defs.cache(kind_defs)
+              return { diagnostics, {kind_defs, lsp_defs} }
+            }
+          }
+        }
+      }
+    }
+  }
+
+Lsp.Synth.file(file: String, code: String, defs: Kind.Defs): IO<Either<Lsp.Diagnostic, Pair<List<Kind.Name>, Pair<Kind.Defs, Lsp.Check.Defs>>>>
+  IO {
+    let read = Lsp.Synth.read_file(file, code, defs);
+    case read {
+      left: IO {
+        return Either.left!!(read.value);
+      },
+      right: IO {
+        let file_defs = read.value;
+        let file_keys = BitsMap.keys!(file_defs);
+        let file_nams = List.mapped!(file_keys)!(Kind.Name.from_bits);
+        get defs = Lsp.Synth.many(file_nams, file_defs, {} );
+        return Either.right!!({file_nams, defs});
+      },
+    };
+  }
+
+Lsp.Synth.read_file(file: String, code: String, defs: Kind.Defs): Either<Lsp.Diagnostic, Kind.Defs>
+  case Kind.Parser.file(file, code, defs, Parser.State.new(none, "", 0, 0, code)) as parsed {
+    error:
+      open parsed.err
+      let err = parsed.err.msg | (case parsed.err.nam { nil: "", cons: " Inside " | parsed.err.nam | ":" })
+      let diagnostic = Lsp.Diagnostic.new(
+        err,
+        Lsp.Diagnostic.Severity.Error,
+        file,
+        Nat.to_u32(parsed.err.ini)
+        Nat.to_u32(parsed.err.idx)
+      )
+      Either.left!!(diagnostic)
+    value:
+      Either.right!!(parsed.val)
+  }
+
+Lsp.Synth.many(names: List<String>, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): IO<Pair<Kind.Defs, Lsp.Check.Defs>>
+  case names {
+    nil: IO {
+      return {defs, lsp_defs};
+    },
+    cons: IO {
+      get result = Lsp.Synth.one(names.head, defs, lsp_defs);
+      case result {
+        none: 
+          Lsp.Synth.many(names.tail, defs, lsp_defs)
+        some: 
+          let {new_defs, new_lsp_defs} = result.value
+          Lsp.Synth.many(names.tail, new_defs, new_lsp_defs)
+      }
+    }
+  }
+
+// synthesizes all definitions needed for a term
+Lsp.Synth.one(name: Kind.Name, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): IO(Maybe(Pair(Kind.Defs, Lsp.Check.Defs)))
+  case Kind.Map.get!(name, defs) as got {
+
+    none: IO {
+      get loaded = Kind.Synth.load(name, defs);
+      case loaded {
+        none: IO {
+          return none
+        }
+        some: IO {
+          get result = Lsp.Synth.one(name, loaded.value, lsp_defs)
+          return result
+        }
+      }
+    }
+    some: 
+      open got.value
+      IO {
+        let file = got.value.file;
+        let code = got.value.code;
+        let orig = got.value.orig;
+        let name = got.value.name;
+        let term = got.value.term;
+        let type = got.value.type;
+        let isct = got.value.isct;
+        let arit = got.value.arit;
+        let stat = got.value.stat;
+        case stat {
+          wait: IO { return some({defs, lsp_defs}); },
+          done: IO { return some({defs, lsp_defs}); },
+          fail: IO { return some({defs, lsp_defs}); },
+          init: IO {
+            let defs = Kind.Map.set!(name, Kind.Def.new(file, code, orig, name, term, type, isct, arit, Kind.Status.wait), defs);
+            let checked = Kind.Check {
+              get chk_type = Lsp.check(type, Maybe.some!(Kind.Term.typ), defs, [], Kind.Path.Maybe.Builder.i(Kind.Path.Maybe.Builder.nil), Maybe.none!, BBT.tip!!);
+              let {chk_type, refs} = chk_type
+              get chk_term = Lsp.check(term, Maybe.some!(type), defs, [], Kind.Path.Maybe.Builder.o(Kind.Path.Maybe.Builder.nil), Maybe.none!, refs);
+              let {chk_term, refs} = chk_term
+              return refs
+            };
+            case checked {
+              result:
+                let refs = checked.value <> BBT.tip!!
+                if List.is_empty!(checked.errors) then IO {
+                  let defs = Kind.Map.def(file, code, orig, name, term, type, isct, arit, true, defs);
+                  let lsp_defs = Map.set!(name, {file, code, orig, name, term, type, refs}, lsp_defs)
+                  return some({defs, lsp_defs});
+                } else IO {
+                  get fixed = Kind.Synth.fix(file, code, orig, name, term, type, isct, arit, defs, checked.errors, Bool.false);
+                  case fixed {
+                    none: IO {
+                      let stat = Kind.Status.fail(checked.errors);
+                      let defs = Kind.Map.set!(name, Kind.Def.new(file, code, orig, name, term, type, isct, arit, stat), defs);
+                      let lsp_defs = Map.set!(name, {file, code, orig, name, term, type, refs}, lsp_defs)
+                      return some({defs, lsp_defs});
+                    },
+                    some: Lsp.Synth.one(name, fixed.value, lsp_defs),
+                  };
+                }
+            };
+          }
+        };
+      }
+  }
+
+
+Lsp.check(
+  term: Kind.Term
+  type: Maybe<Kind.Term>
+  defs: Kind.Defs
+  ctx: Kind.Context
+  path: Kind.Path.Maybe.Builder
+  orig: Maybe<Pair<Nat,Nat>>
+  refs: Lsp.Defs.Map
+): Kind.Check<Lsp.Check.Result>
+  Kind.Check {
+    get pair = case term {
+      ref: case Kind.Map.get!(term.name, defs) as got {
+        none: Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.undefined_reference(orig,  term.name)])
+        some: case got.value {
+          new:
+            let ref_name = got.value.name
+            let ref_type = got.value.type
+            let ref_term = got.value.term
+            let ref_stat = got.value.stat
+            let refs = case ref_type {
+              typ: Lsp.Defs.Map.set(ref_name, orig, ref_term, refs)
+            } default Lsp.Defs.Map.set(ref_name, orig, ref_type, refs)
+            let ref_type = some(ref_type)
+            case ref_stat {
+              init: Kind.Check.result!(Lsp.on_hover.build_result(ref_type, refs),  [Kind.Error.waiting(ref_name)])
+              wait: Kind.Check.result!(Lsp.on_hover.build_result(ref_type, refs),  [])
+              done: Kind.Check.result!(Lsp.on_hover.build_result(ref_type, refs),  [])
+              fail: Kind.Check.result!(Lsp.on_hover.build_result(ref_type, refs),  [Kind.Error.indirect(ref_name)])
+            }
+        }
+      }
+      var: case List.at_last!(term.indx, ctx) as got {
+        none: Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.undefined_reference(orig,  term.name)])
+        some: Kind.Check { return { got.value@snd, refs} }
+      }
+      typ: Kind.Check {
+        return { Kind.Term.typ, refs }
+      }
+      all: Kind.Check {
+        let ctx_size = List.length!(ctx)
+        let self_var = Kind.Term.var(term.self, ctx_size)
+        let body_var = Kind.Term.var(term.name, Nat.succ(ctx_size))
+        let refs = Lsp.Defs.Map.set(term.name, orig, term.xtyp, refs)
+        let refs = Lsp.Defs.Map.set(term.self, orig, term, refs)
+        let body_ctx = List.cons!({term.name,term.xtyp}, List.cons!({term.self,term}, ctx))
+        get pair = Lsp.check(term.xtyp, some(Kind.Term.typ), defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+        let {_, refs} = pair
+        get pair = Lsp.check(term.body(self_var,body_var), some(Kind.Term.typ), defs, body_ctx, Kind.Path.Maybe.Builder.i(path), orig, refs)
+        let {_, refs} = pair
+        return { Kind.Term.typ, refs }
+      }
+      lam: case type {
+        none: Kind.Check {
+            //Kind.Term.all(Bool.false, "", "", Kind.Term.hol(Bits.e), (s,x) t))
+          let lam_type = Kind.Term.hol(Bits.e)
+          let lam_term = Kind.Term.ann(Bool.false, term, lam_type)
+          Lsp.check.patch(lam_term, type, path, refs)
+          //Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.patch(Kind.Path.Maybe.Builder.to_bits(path)), lam_term)])
+          //Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.cant_infer(orig, term),  ctx)])
+        }
+        some: Kind.Check {
+          let typv = Kind.Term.reduce(type.value, defs)
+          case typv {
+            all: Kind.Check {
+              let ctx_size = List.length!(ctx)
+              let self_var = term
+              let body_var = Kind.Term.var(term.name, ctx_size)
+              let body_typ = typv.body(self_var, body_var)
+              let refs = Lsp.Defs.Map.set(term.name, orig, typv.xtyp, refs)
+              let body_ctx = List.cons!({term.name,typv.xtyp}, ctx)
+              get pair = Lsp.check(term.body(body_var), some(body_typ), defs, body_ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+              let {_, refs} = pair
+              return { type.value, refs}
+            }
+            //hol: Kind.Check {
+              //Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.patch(Kind.Path.Maybe.Builder.to_bits(path)), lam_term)])
+            //}
+            _: Kind.Check {
+              let expected = Either.left!!("function")
+              let detected = Either.right!!(type.value)
+              Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.type_mismatch(orig, expected, detected, ctx)])
+            }
+          }
+        }
+      }
+      app: Kind.Check {
+        get pair = Lsp.check(term.func, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+        let {func_typ, refs} = pair
+
+        let func_typ = Kind.Term.reduce(func_typ, defs)
+        case func_typ {
+          all: Kind.Check {
+            let xtyp = Kind.Term.unori(func_typ.xtyp)
+            let argm = Kind.Term.unori(term.argm)
+            // Implicit application
+            case xtyp {
+              imp: case argm {
+                imp: Kind.Check {
+                  let body_typ = func_typ.body(term.func, argm.expr)
+                  get pair = Lsp.check(argm.expr, some(xtyp.expr), defs, ctx, Kind.Path.Maybe.Builder.i(path), orig, refs)
+                  let {type, refs} = pair
+                  return {body_typ, refs}
+                }
+              } default Kind.Check {
+                Lsp.check.patch(Kind.Term.app(Kind.Term.app(term.func, Kind.Term.imp(Kind.Term.hol(Bits.e))), term.argm), type, path, refs)
+              }
+            // Explicit application
+            } default Kind.Check {
+              let body_typ = func_typ.body(term.func, term.argm)
+              get pair = Lsp.check(term.argm, some(func_typ.xtyp), defs, ctx, Kind.Path.Maybe.Builder.i(path), orig, refs)
+              let {type, refs} = pair
+              return {body_typ, refs}
+            }
+          }
+        } default Kind.Check {
+          let expected = Either.left!!("function")
+          let detected = Either.right!!(func_typ)
+          let orig = case term.func { ori: some(term.func.orig) } default orig
+          Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.type_mismatch(orig, expected, detected, ctx)])
+        }
+      }
+      ann:
+        if term.done then Kind.Check {
+          return { term.type, refs }
+        } else Kind.Check {
+          get pair = Lsp.check(term.term, some(term.type), defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+          let {_, refs} = pair
+          get pair = Lsp.check(term.type, some(Kind.Term.typ), defs, ctx, Kind.Path.Maybe.Builder.i(path), orig, refs)
+          let {type, refs} = pair
+          return {term.type, refs}
+        }
+      let: Kind.Check {
+        let ctx_size = List.length!(ctx)
+        get pair = Lsp.check(term.expr, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+        let {expr_typ, refs} = pair
+        let body_val = term.body(Kind.Term.var(term.name, ctx_size))
+        let refs = Lsp.Defs.Map.set(term.name, orig, expr_typ, refs)
+        let body_ctx = List.cons!({term.name, expr_typ}, ctx)
+        get body_typ = Lsp.check(body_val, type, defs, body_ctx, Kind.Path.Maybe.Builder.i(path), orig, refs)
+        return body_typ
+      }
+      def: Kind.Check {
+        let ctx_size = List.length!(ctx)
+        get pair = Lsp.check(term.expr, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+        let {expr_typ, refs} = pair
+        let body_val = term.body(term.expr)
+        let refs = Lsp.Defs.Map.set(term.name, orig, expr_typ, refs)
+        let body_ctx = List.cons!({term.name, expr_typ}, ctx)
+        get body_typ = Lsp.check(body_val, type, defs, body_ctx, Kind.Path.Maybe.Builder.i(path), orig, refs)
+        return body_typ
+      }
+      nat: case type {
+        none: Lsp.Term.check.direct(Kind.Term.ref("Nat"), defs, refs)
+        some: Kind.Check {
+          let tnam = Kind.Term.check.get_name_of_self_type(type.value, defs)
+          case tnam {
+            none: Lsp.Term.check.direct(Kind.Term.ref("Nat"), defs, refs)
+            some: if String.eql(tnam.value, "Nat")
+              then Lsp.Term.check.direct(Kind.Term.ref("Nat"), defs, refs)
+              else
+                let cast = Kind.Term.ref(tnam.value | ".from_nat")
+                let cast = Kind.Term.app(cast, term) 
+                Lsp.check.patch(cast, type, path, refs)
+          }
+        }
+      }
+      chr: Kind.Check {
+        Lsp.Term.check.direct(Kind.Term.ref("Word.from_bits"), defs, refs)
+        Lsp.Term.check.direct(Kind.Term.ref("U16.new"), defs, refs)
+        Lsp.Term.check.direct(Kind.Term.ref("Char"), defs, refs)
+      }
+      str: Kind.Check {
+        Lsp.Term.check.direct(Kind.Term.ref("Word.from_bits"), defs, refs)
+        Lsp.Term.check.direct(Kind.Term.ref("U16.new"), defs, refs)
+        Lsp.Term.check.direct(Kind.Term.ref("String"), defs, refs)
+      }
+      num: Kind.Check {
+        let dsug = Kind.Term.check.expand.num(term.sign, term.numb, term.frac, type, defs)
+        Lsp.check.patch(dsug, type, path, refs)
+      }
+      cse: Kind.Check {
+        let expr = term.expr
+        get pair = Lsp.check(expr, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+        let {etyp, refs} = pair
+        get wyth = Kind.Term.check.infer_types_of_with(term.with, defs, ctx, path, orig)
+        let dsug = Kind.Term.check.expand.cse(term.expr, term.name, wyth, term.cses, term.moti, etyp, type, defs, ctx)
+        case dsug {
+          none: Lsp.Term.check.cant_infer(term, type, ctx, orig, refs)
+          some: Lsp.check.patch(dsug.value, type, path, refs)
+        }
+      }
+      new: Kind.Check {
+        let dsug = Kind.Term.check.expand.new(term.args, type, defs)
+        case dsug {
+          none: Lsp.Term.check.cant_infer(term, type, ctx, orig, refs)
+          some: Lsp.check.patch(dsug.value, type, path, refs)
+        }
+      }
+      get: Kind.Check {
+        let expr = term.expr
+        get pair = Lsp.check(expr, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+        let {etyp, refs} = pair
+        let dsug = Kind.Term.check.expand.get(term.expr, term.fkey, etyp, defs)
+        case dsug {
+          none: Lsp.Term.check.cant_infer(term, type, ctx, orig, refs)
+          some: Lsp.check.patch(dsug.value, type, path, refs)
+        }
+      }
+      set: Kind.Check {
+        let expr = term.expr
+        get pair = Lsp.check(expr, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+        let {etyp, refs} = pair
+        let dsug = Kind.Term.check.expand.mut(term.expr, term.fkey, (x) term.fval, etyp, defs)
+        case dsug {
+          none: Lsp.Term.check.cant_infer(term, type, ctx, orig, refs)
+          some: Lsp.check.patch(dsug.value, type, path, refs)
+        }
+      }
+      mut: Kind.Check {
+        let expr = term.expr
+        get pair = Lsp.check(expr, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+        let {etyp, refs} = pair
+        let dsug = Kind.Term.check.expand.mut(term.expr, term.fkey, Kind.Term.app(term.ffun), etyp, defs)
+        case dsug {
+          none: Lsp.Term.check.cant_infer(term, type, ctx, orig, refs)
+          some: Lsp.check.patch(dsug.value, type, path, refs)
+        }
+      }
+      ope: Kind.Check {
+        let otyp = type <> Kind.Term.hol(Bits.e)
+        let dsug = Kind.Term.check.expand.ope(true, term.name, term.arg0, term.arg1, otyp, defs)
+        case dsug {
+          none: Kind.Check {
+            get pair = Lsp.check(term.arg0, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
+            let {otyp, refs} = pair
+            let dsug = Kind.Term.check.expand.ope(false, term.name, term.arg0, term.arg1, otyp, defs)
+            case dsug {
+              none: Lsp.Term.check.cant_infer(term, type, ctx, orig, refs)
+              some: Lsp.check.patch(dsug.value, type, path, refs)
+            }
+          }
+          some: Lsp.check.patch(dsug.value, type, path, refs)
+        }
+      }
+      gol: Kind.Check {
+        Kind.Check.result!(Lsp.on_hover.build_result(type, refs),  [
+          Kind.Error.show_goal(term.name, term.dref, term.verb, type, ctx)
+        ])
+      }
+      hol: Kind.Check {
+        Kind.Check.result!(Lsp.on_hover.build_result(type, refs),  [])
+      }
+      imp: Kind.Check {
+        Lsp.check(term.expr, type, defs, ctx, path, orig, refs)
+      }
+      ori: Kind.Check {
+        Lsp.check(term.expr, type, defs, ctx, path, some(term.orig), refs)
+      }
+    }
+    let {infr, refs} = pair
+    case type {
+      none:
+        Kind.Check.result!(Lsp.on_hover.build_result(some(infr), refs),  [])
+      some: Kind.Check {
+        get eqls = Kind.Term.equal.go(type.value, infr, defs, List.length!(ctx), BitsSet.mut.new(unit))
+        if eqls then Kind.Check {
+          return {type.value, refs}
+        } else Kind.Check {
+          Kind.Check.result!(Lsp.on_hover.build_result(type, refs),  [
+            Kind.Error.type_mismatch(
+              orig,
+              Either.right!!(type.value),
+              Either.right!!(infr),
+              ctx)
+          ])
+        }
+      }
+    }
+  }
+
+Lsp.on_hover.build_result(
+  type: Maybe<Kind.Term>, 
+  refs: Lsp.Defs.Map
+): Maybe<Lsp.Check.Result>
+  case type {
+    none: none
+    some: some( {type.value, refs} :: Lsp.Check.Result )
+  }
+
+Lsp.Term.check.direct(term: Kind.Term, defs: Kind.Defs, refs: Lsp.Defs.Map): Kind.Check<Lsp.Check.Result>
+  Kind.Check {
+    get pair = Lsp.check(term, none, defs, [], Kind.Path.Maybe.Builder.nil, none, refs)
+    let {_, refs} = pair
+    return {term, refs}
+  }
+
+Lsp.check.patch(
+  term: Kind.Term, 
+  type: Maybe<Kind.Term>, 
+  path: Kind.Path.Maybe.Builder
+  refs: Lsp.Defs.Map
+): Kind.Check<Lsp.Check.Result>
+  Kind.Check {
+    Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.patch(Kind.Path.Maybe.Builder.to_bits(path), term)])
+  }
+
+Lsp.Term.check.cant_infer(term: Kind.Term, type: Maybe(Kind.Term), ctx: Kind.Context, orig: Maybe<Pair<Nat,Nat>>, refs: Lsp.Defs.Map): Kind.Check<Lsp.Check.Result>
+  Kind.Check {
+    Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.cant_infer(orig, term, ctx)])
+  }
