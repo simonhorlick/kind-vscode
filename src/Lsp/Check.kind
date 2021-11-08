@@ -118,7 +118,6 @@ Lsp.Synth.many(names: List<String>, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): 
           Lsp.Synth.many(names.tail, defs, lsp_defs)
         some: 
           let {new_defs, new_lsp_defs} = result.value
-          log(List.show!((x) x, Map.keys!(new_lsp_defs)))
           Lsp.Synth.many(names.tail, new_defs, new_lsp_defs)
       }
     }
@@ -171,7 +170,6 @@ Lsp.Synth.one(name: Kind.Name, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): IO(Ma
                 if List.is_empty!(checked.errors) then IO {
                   let defs = Kind.Map.def(file, code, orig, name, term, type, isct, arit, true, defs);
                   let lsp_defs = Map.set!(name, {file, code, orig, name, term, type, refs}, lsp_defs)
-                  log("Setted: " | name)
                   return some({defs, lsp_defs});
                 } else IO {
                   get fixed = Kind.Synth.fix(file, code, orig, name, term, type, isct, arit, defs, checked.errors, Bool.false);
@@ -180,7 +178,6 @@ Lsp.Synth.one(name: Kind.Name, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): IO(Ma
                       let stat = Kind.Status.fail(checked.errors);
                       let defs = Kind.Map.set!(name, Kind.Def.new(file, code, orig, name, term, type, isct, arit, stat), defs);
                       let lsp_defs = Map.set!(name, {file, code, orig, name, term, type, refs}, lsp_defs)
-                      log("Setted: " | name)
                       return some({defs, lsp_defs});
                     },
                     some: Lsp.Synth.one(name, fixed.value, lsp_defs),
