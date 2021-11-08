@@ -15,7 +15,6 @@ Lsp.on_hover(
   
   Maybe {
     get lsp_def = lsp_def
-    // log(List.show!((x) open x; Lsp.on_hover.show.ref(x.fst@fst, x.snd) | "\n", Lsp.Defs.Map.to_list(lsp_def@refs)))
     get type    = Lsp.on_hover.find_ref(offset, name, lsp_def@refs)
     return Lsp.on_hover.show.ref(name, type)
   }
@@ -42,22 +41,11 @@ Lsp.on_hover.find_ref.go(
   refs: Lsp.Defs.Map
   result: Maybe<Kind.Term>
 ): Maybe<Kind.Term>
-  case refs {
-    tip: result
-    bin: 
-      let node_name   = refs.key@fst
-      let node_offset = refs.key@snd
-      let node_type   = refs.val
-      let cmp = String.cmp(name, node_name)
-      case cmp {
-        eql:
-          if Nat.gte(offset, node_offset) then
-            Lsp.on_hover.find_ref.go(offset, name, refs.right, some(node_type))
-          else
-            Lsp.on_hover.find_ref.go(offset, name, refs.left, result)
-        ltn: Lsp.on_hover.find_ref.go(offset, name, refs.left, result)
-        gtn: Lsp.on_hover.find_ref.go(offset, name, refs.right, result)
-      }
+  Maybe {
+    get pile = refs{name}
+    get value = List.find!( (x) open x; Nat.between(x.fst@fst, offset ,x.fst@snd),  pile)
+    let type = value@snd
+    return type
   }
 
 // SHOW
