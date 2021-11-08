@@ -112,11 +112,13 @@ Lsp.Synth.many(names: List<String>, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): 
       return {defs, lsp_defs};
     },
     cons: IO {
-      get result = Lsp.Synth.one(names.head, defs, {});
+      get result = Lsp.Synth.one(names.head, defs, lsp_defs);
       case result {
-        none: Lsp.Synth.many(names.tail, defs, lsp_defs)
+        none: 
+          Lsp.Synth.many(names.tail, defs, lsp_defs)
         some: 
           let {new_defs, new_lsp_defs} = result.value
+          log(List.show!((x) x, Map.keys!(new_lsp_defs)))
           Lsp.Synth.many(names.tail, new_defs, new_lsp_defs)
       }
     }
@@ -125,7 +127,7 @@ Lsp.Synth.many(names: List<String>, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): 
 // synthesizes all definitions needed for a term
 Lsp.Synth.one(name: Kind.Name, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): IO(Maybe(Pair(Kind.Defs, Lsp.Check.Defs)))
   case Kind.Map.get!(name, defs) as got {
-    // load needed definitions from files
+
     none: IO {
       get loaded = Kind.Synth.load(name, defs);
       case loaded {
@@ -169,6 +171,7 @@ Lsp.Synth.one(name: Kind.Name, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): IO(Ma
                 if List.is_empty!(checked.errors) then IO {
                   let defs = Kind.Map.def(file, code, orig, name, term, type, isct, arit, true, defs);
                   let lsp_defs = Map.set!(name, {file, code, orig, name, term, type, refs}, lsp_defs)
+                  log("Setted: " | name)
                   return some({defs, lsp_defs});
                 } else IO {
                   get fixed = Kind.Synth.fix(file, code, orig, name, term, type, isct, arit, defs, checked.errors, Bool.false);
@@ -177,6 +180,7 @@ Lsp.Synth.one(name: Kind.Name, defs: Kind.Defs, lsp_defs: Lsp.Check.Defs): IO(Ma
                       let stat = Kind.Status.fail(checked.errors);
                       let defs = Kind.Map.set!(name, Kind.Def.new(file, code, orig, name, term, type, isct, arit, stat), defs);
                       let lsp_defs = Map.set!(name, {file, code, orig, name, term, type, refs}, lsp_defs)
+                      log("Setted: " | name)
                       return some({defs, lsp_defs});
                     },
                     some: Lsp.Synth.one(name, fixed.value, lsp_defs),
@@ -198,7 +202,6 @@ Lsp.check(
   orig: Maybe<Pair<Nat,Nat>>
   refs: Lsp.Defs.Map
 ): Kind.Check<Lsp.Check.Result>
-  // log(List.show!((x) x@fst | ": " | Kind.Term.show(x@snd), ctx))
   Kind.Check {
     get pair = case term {
       ref: case Kind.Map.get!(term.name, defs) as got {
@@ -243,8 +246,6 @@ Lsp.check(
       }
       lam: case type {
         none: Kind.Check {
-          //let lam_arit = Kind.Term.arity(term)
-          //let lam_type = Nat.for!(Kind.Term.hol(Bits.e),0,lam_arit,(i,t) 
             //Kind.Term.all(Bool.false, "", "", Kind.Term.hol(Bits.e), (s,x) t))
           let lam_type = Kind.Term.hol(Bits.e)
           let lam_term = Kind.Term.ann(Bool.false, term, lam_type)
@@ -260,7 +261,6 @@ Lsp.check(
               let self_var = term
               let body_var = Kind.Term.var(term.name, ctx_size)
               let body_typ = typv.body(self_var, body_var)
-              log("lam, all: " | term.name)
               let refs = Lsp.Defs.Map.set(term.name, orig, typv.xtyp, refs)
               let body_ctx = List.cons!({term.name,typv.xtyp}, ctx)
               get pair = Lsp.check(term.body(body_var), some(body_typ), defs, body_ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
@@ -268,8 +268,6 @@ Lsp.check(
               return { type.value, refs}
             }
             //hol: Kind.Check {
-              //let lam_type = Kind.Term.all(Bool.false, "", "", Kind.Term.hol(Bits.e), (s,x) Kind.Term.hol(Bits.e))
-              //let lam_term = Kind.Term.ann(Bool.false, term, lam_type)
               //Kind.Check.result!(Lsp.on_hover.build_result(type, refs), [Kind.Error.patch(Kind.Path.Maybe.Builder.to_bits(path)), lam_term)])
             //}
             _: Kind.Check {
@@ -283,10 +281,8 @@ Lsp.check(
       app: Kind.Check {
         get pair = Lsp.check(term.func, none, defs, ctx, Kind.Path.Maybe.Builder.o(path), orig, refs)
         let {func_typ, refs} = pair
-        //log("- func_typ_term " | Kind.Term.show(func_typ))
 
         let func_typ = Kind.Term.reduce(func_typ, defs)
-        //log("- func_typ_whnf " | Kind.Term.show(func_typ))
         case func_typ {
           all: Kind.Check {
             let xtyp = Kind.Term.unori(func_typ.xtyp)
@@ -295,14 +291,12 @@ Lsp.check(
             case xtyp {
               imp: case argm {
                 imp: Kind.Check {
-                  //log("- implicit: check")
                   let body_typ = func_typ.body(term.func, argm.expr)
                   get pair = Lsp.check(argm.expr, some(xtyp.expr), defs, ctx, Kind.Path.Maybe.Builder.i(path), orig, refs)
                   let {type, refs} = pair
                   return {body_typ, refs}
                 }
               } default Kind.Check {
-                //log("- implicit: patch")
                 Lsp.check.patch(Kind.Term.app(Kind.Term.app(term.func, Kind.Term.imp(Kind.Term.hol(Bits.e))), term.argm), type, path, refs)
               }
             // Explicit application
